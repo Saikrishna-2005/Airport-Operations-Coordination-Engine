@@ -107,11 +107,15 @@ The backend is developed using FastAPI.
 
 The backend provides the foundation for integrating AI-based planning and operational rule evaluation.
 
+![FastAPI Swagger UI](screenshots/backend-swagger.png)
+
 ## 7. AI Planning Agent
 
 The Planning Agent is the first AI agent implemented in the project.
 
 It uses Google Gemini through LangChain to generate structured planning results from the supplied airport disruption information.
+
+![Gemini Planning Agent Connection Test](screenshots/gemini-planning-agent.png)
 
 ### Main responsibilities
 
@@ -157,6 +161,8 @@ The Rule Engine produces results that help identify operational conditions requi
 
 **Note:** Rule evaluation is advisory and does not independently authorize operational decisions.
 
+![Rule Engine Test Results](screenshots/rule-engine-tests.png)
+
 ## 9. Workflow Integration
 
 The workflow integrates the Planning Agent and Rule Engine.
@@ -177,6 +183,8 @@ An example workflow status observed during testing is:
 `planning_and_rules_completed_pending_review`
 
 This indicates that planning and rule evaluation have completed and the results remain pending review.
+
+![Airport Operations Workflow Result](screenshots/airport-workflow-execution.png)
 
 ## 10. Database and Persistence
 

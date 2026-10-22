@@ -184,8 +184,6 @@ An example workflow status observed during testing is:
 
 This indicates that planning and rule evaluation have completed and the results remain pending review.
 
-![Airport Operations Workflow Result](screenshots/airport-workflow-execution.png)
-
 ## 10. Database and Persistence
 
 The project uses SQLite to store workflow information.
@@ -205,6 +203,8 @@ Workflow records can include:
 * Rule evaluation results.
 
 The workflow implementation has been tested for saving and retrieving planning and rule evaluation results.
+
+![Airport Operations Workflow Result](screenshots/airport-workflow-execution.png)
 
 ## 11. Environment Setup
 

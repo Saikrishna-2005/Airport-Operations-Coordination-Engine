@@ -1,3 +1,4 @@
+import json
 from app.agents.llm import get_llm
 from app.agents.prompts import PLANNING_AGENT_PROMPT
 from app.agents.schemas import PlanningResult
@@ -8,6 +9,7 @@ def run_planning_agent(
     airport: str,
     disruption: str,
     affected_flights: list[str],
+    gate_information: dict | None = None,
 ) -> PlanningResult:
 
     if not workflow_id.strip():
@@ -36,6 +38,15 @@ def run_planning_agent(
             "airport": airport,
             "disruption": disruption,
             "affected_flights": ", ".join(affected_flights),
+            "gate_information": json.dumps(
+                gate_information
+                if gate_information is not None
+                else {
+                    "status": "not_checked",
+                    "reason": "No gate request was provided",
+                },
+                indent=2,
+            ),
         }
     )
 

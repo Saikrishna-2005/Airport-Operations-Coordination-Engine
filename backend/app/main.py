@@ -6,6 +6,7 @@ from app.api.auth import router as auth_router
 from app.api.workflow import router as workflow_router
 from app.api.permission import router as permission_router
 from app.api.audit import router as audit_router
+from app.api.gates import router as gates_router
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -31,6 +32,7 @@ app.include_router(auth_router)
 app.include_router(workflow_router)
 app.include_router(permission_router)
 app.include_router(audit_router)
+app.include_router(gates_router)
 
 @app.get("/")
 def home():

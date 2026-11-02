@@ -8,6 +8,7 @@ from app.core.dependencies import get_current_user
 from app.database.connection import get_db_connection
 from app.schemas.workflow import WorkflowCreate, WorkflowResponse
 from app.agents.workflow import build_airport_workflow
+from app.tools.gate_availability_tool import GateAvailabilityRequest
 
 
 router = APIRouter(
@@ -76,7 +77,43 @@ def start_workflow(
                 "list of non-empty strings."
             ),
         )
+        # Validate optional gate availability input.
+    gate_request = input_data.get("gate_request")
 
+    if gate_request is not None:
+        try:
+            validated_gate_request = GateAvailabilityRequest.model_validate(
+                gate_request
+            )
+
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=exc.errors(
+                    include_context=False,
+                    include_input=False,
+                ),
+            ) from exc
+
+        if (
+            validated_gate_request.airport_code.upper()
+            != input_data["airport"].strip().upper()
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Gate request airport must match workflow airport.",
+            )
+
+        if (
+            validated_gate_request.flight_number
+            not in input_data["affected_flights"]
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Gate request flight must be an affected flight.",
+            )
+
+        gate_request = validated_gate_request.model_dump()
     workflow_id = str(uuid.uuid4())
     user_id = current_user["user_id"]
 
@@ -116,6 +153,7 @@ def start_workflow(
             "airport": input_data["airport"],
             "disruption": input_data["disruption"],
             "affected_flights": input_data["affected_flights"],
+            "gate_request": gate_request,
             "planning_result": {},
             "rule_results": [],
             "status": "pending",

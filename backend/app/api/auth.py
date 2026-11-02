@@ -15,6 +15,15 @@ from app.schemas.auth import (
     TokenResponse
 )
 
+import sqlite3
+from uuid import uuid4
+
+from fastapi import HTTPException, status
+
+from app.database.database import create_user
+
+from app.schemas.auth import SignupRequest
+
 
 router = APIRouter(
     prefix="/auth",
@@ -76,4 +85,55 @@ def admin_only(
         "message": "Admin access granted",
         "username": current_user["username"],
         "role": current_user["role"]
+    }
+
+# ============================================================
+# DYNAMIC USER SIGNUP
+# POST /auth/signup
+# ============================================================
+
+@router.post("/signup", status_code=status.HTTP_201_CREATED)
+def signup(request: SignupRequest):
+
+    # Step 1: Normalize username
+    username = request.username.strip()
+
+    # Step 2: Check whether username already exists
+    existing_user = get_user_by_username(username)
+
+    if existing_user is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already registered"
+        )
+
+    # Step 3: Generate unique user ID
+    user_id = f"USR-{uuid4().hex[:12].upper()}"
+
+    # Step 4: Assign restricted default role
+    role = "operator"
+
+    # Step 5: Save user in SQLite
+    # create_user() hashes the password automatically.
+    try:
+        create_user(
+            user_id=user_id,
+            username=username,
+            password=request.password,
+            role=role
+        )
+
+    except sqlite3.IntegrityError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already registered"
+        )
+
+    # Step 6: Return signup confirmation
+    return {
+        "success": True,
+        "message": "Account created successfully",
+        "user_id": user_id,
+        "username": username,
+        "role": role
     }

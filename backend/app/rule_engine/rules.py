@@ -40,19 +40,52 @@ def evaluate_rainfall_rule(data: OperationalInput) -> RuleResult:
 
 
 def evaluate_runway_rule(data: OperationalInput) -> RuleResult:
-    """Flag a runway reported as unavailable."""
+    """
+    Evaluate reported runway availability.
 
-    triggered = not data.runway_available
+    True  -> Available
+    False -> Unavailable
+    None  -> Unknown / Not evaluated
+    """
 
+    # CASE 1: Runway status is unknown
+    if data.runway_available is None:
+        return RuleResult(
+            rule_id="RULE-003",
+            rule_name="Runway Availability Risk",
+            triggered=False,
+            severity="LOW",
+            evaluation_status="NOT_EVALUATED",
+            message=(
+                "Runway availability is unknown. "
+                "No verified runway status was provided. "
+                "Operational confirmation is required."
+            ),
+        )
+
+    # CASE 2: Runway is unavailable
+    if data.runway_available is False:
+        return RuleResult(
+            rule_id="RULE-003",
+            rule_name="Runway Availability Risk",
+            triggered=True,
+            severity="HIGH",
+            evaluation_status="EVALUATED",
+            message=(
+                "The runway is reported unavailable. "
+                "Further operational assessment is required."
+            ),
+        )
+
+    # CASE 3: Runway is available
     return RuleResult(
         rule_id="RULE-003",
         rule_name="Runway Availability Risk",
-        triggered=triggered,
-        severity="HIGH" if triggered else "LOW",
+        triggered=False,
+        severity="LOW",
+        evaluation_status="EVALUATED",
         message=(
-            "The runway is reported unavailable. "
-            "Further operational assessment is required."
-            if triggered
-            else "The runway is reported available."
+            "The runway is reported available. "
+            "Operational verification may still be required."
         ),
     )

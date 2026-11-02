@@ -1,5 +1,6 @@
-
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
+
 import {
   Plane,
   CloudSun,
@@ -11,9 +12,14 @@ import {
   ShieldCheck,
   AlertCircle,
   LoaderCircle,
+  History,
 } from "lucide-react";
 
 import api from "../api";
+
+// ============================================================
+// DASHBOARD MODULES
+// ============================================================
 
 const modules = [
   {
@@ -21,47 +27,100 @@ const modules = [
     description: "Flight status and delays",
     icon: Plane,
     status: "Flight module",
+    path: "/flights",
   },
   {
     title: "Weather & Alerts",
     description: "Alerts and disruptions",
     icon: CloudSun,
     status: "Weather module",
+    path: "/weather",
   },
   {
     title: "Gates & Resources",
-    description: "Resource availability",
+    description: "Gate scheduling and conflict detection",
     icon: DoorOpen,
-    status: "Resource module",
+    status: "Gate Availability API integrated",
+    path: "/resources",
+  },
+  {
+    title: "Resource Management",
+    description: "Gate, runway and staff resource monitoring",
+    icon: DoorOpen,
+    status: "Integration in progress",
+    path: "/resource-management",
   },
   {
     title: "Staff Allocation",
     description: "Staff planning and allocation",
     icon: Users,
     status: "Staff module",
+    path: "/staff",
+  },
+
+  // NEW: Staff Assignment History
+  {
+    title: "Staff Assignment History",
+    description:
+      "View historical staff assignments by airport and staff ID",
+    icon: History,
+    status: "SQLite assignment history integrated",
+    path: "/staff/history",
+  },
+
+  {
+    title: "AI Decisions",
+    description: "Operational recommendations and decisions",
+    icon: BrainCircuit,
+    status: "AI module",
+    path: "/ai-decisions",
   },
   {
     title: "AI Agent Activity",
-    description: "Research, analysis and planning",
-    icon: BrainCircuit,
-    status: "AI module",
+    description: "AI agent monitoring and workflow status",
+    icon: Activity,
+    status: "Planning Agent implemented",
+    path: "/agent-monitoring",
   },
 ];
 
-function SummaryCard({ title, value, description, icon: Icon }) {
+// ============================================================
+// SUMMARY CARD
+// ============================================================
+
+function SummaryCard({
+  title,
+  value,
+  description,
+  icon: Icon,
+}) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-400">{title}</p>
-        <Icon size={20} className="text-sky-400" />
+        <p className="text-sm text-slate-400">
+          {title}
+        </p>
+
+        <Icon
+          size={20}
+          className="text-sky-400"
+        />
       </div>
 
-      <p className="mt-4 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-4 text-3xl font-bold text-white">
+        {value}
+      </p>
 
-      <p className="mt-2 text-xs text-slate-500">{description}</p>
+      <p className="mt-2 text-xs text-slate-500">
+        {description}
+      </p>
     </div>
   );
 }
+
+// ============================================================
+// BACKEND AUTHENTICATION STATUS
+// ============================================================
 
 function BackendAuthStatus() {
   const [profile, setProfile] = useState(null);
@@ -76,7 +135,6 @@ function BackendAuthStatus() {
       setError("");
 
       try {
-        // The api.js interceptor attaches the JWT automatically.
         const response = await api.get("/auth/me");
 
         if (active) {
@@ -131,9 +189,15 @@ function BackendAuthStatus() {
               className="animate-spin text-sky-400"
             />
           ) : error ? (
-            <AlertCircle size={24} className="text-red-400" />
+            <AlertCircle
+              size={24}
+              className="text-red-400"
+            />
           ) : (
-            <ShieldCheck size={24} className="text-emerald-400" />
+            <ShieldCheck
+              size={24}
+              className="text-emerald-400"
+            />
           )}
         </div>
 
@@ -147,7 +211,10 @@ function BackendAuthStatus() {
               Verifying your access token with FastAPI...
             </p>
           ) : error ? (
-            <p role="alert" className="mt-2 text-sm leading-6 text-red-400">
+            <p
+              role="alert"
+              className="mt-2 text-sm leading-6 text-red-400"
+            >
               {error}
             </p>
           ) : (
@@ -158,21 +225,30 @@ function BackendAuthStatus() {
 
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-lg bg-slate-950 p-3">
-                  <p className="text-xs text-slate-500">Username</p>
+                  <p className="text-xs text-slate-500">
+                    Username
+                  </p>
+
                   <p className="mt-1 break-words text-sm text-white">
                     {profile?.username || "Not provided"}
                   </p>
                 </div>
 
                 <div className="rounded-lg bg-slate-950 p-3">
-                  <p className="text-xs text-slate-500">User ID</p>
+                  <p className="text-xs text-slate-500">
+                    User ID
+                  </p>
+
                   <p className="mt-1 break-all font-mono text-xs text-white">
                     {profile?.user_id || "Not provided"}
                   </p>
                 </div>
 
                 <div className="rounded-lg bg-slate-950 p-3">
-                  <p className="text-xs text-slate-500">Role</p>
+                  <p className="text-xs text-slate-500">
+                    Role
+                  </p>
+
                   <p className="mt-1 break-words text-sm text-white">
                     {profile?.role || "Not provided"}
                   </p>
@@ -186,9 +262,15 @@ function BackendAuthStatus() {
   );
 }
 
+// ============================================================
+// MAIN DASHBOARD
+// ============================================================
+
 export default function Dashboard() {
   return (
     <div className="space-y-6 p-6">
+      {/* DASHBOARD HEADER */}
+
       <section>
         <p className="text-sm text-slate-400">
           Welcome to the operations centre
@@ -199,8 +281,11 @@ export default function Dashboard() {
         </h2>
       </section>
 
-      {/* Verify the current user's token with the backend. */}
+      {/* BACKEND AUTHENTICATION */}
+
       <BackendAuthStatus />
+
+      {/* SUMMARY CARDS */}
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
@@ -232,9 +317,14 @@ export default function Dashboard() {
         />
       </section>
 
+      {/* OPERATIONS MODULES */}
+
       <section>
         <div className="mb-4 flex items-center gap-2">
-          <Activity size={20} className="text-sky-400" />
+          <Activity
+            size={20}
+            className="text-sky-400"
+          />
 
           <h2 className="text-lg font-bold text-white">
             Operations Modules
@@ -242,41 +332,61 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {modules.map(({ title, description, icon: Icon, status }) => (
-            <article
-              key={title}
-              className="rounded-xl border border-slate-800 bg-slate-900 p-5 transition hover:border-sky-500/60"
-            >
-              <div className="flex items-start justify-between">
-                <div className="rounded-lg bg-sky-500/10 p-3">
-                  <Icon size={24} className="text-sky-400" />
+          {modules.map(
+            ({
+              title,
+              description,
+              icon: Icon,
+              status,
+              path,
+            }) => (
+              <Link
+                key={title}
+                to={path}
+                className="block rounded-xl border border-slate-800 bg-slate-900 p-5 transition hover:border-sky-500/60 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="rounded-lg bg-sky-500/10 p-3">
+                    <Icon
+                      size={24}
+                      className="text-sky-400"
+                    />
+                  </div>
+
+                  <ArrowUpRight
+                    size={18}
+                    className="text-slate-500"
+                  />
                 </div>
 
-                <ArrowUpRight size={18} className="text-slate-500" />
-              </div>
+                <h3 className="mt-4 font-semibold text-white">
+                  {title}
+                </h3>
 
-              <h3 className="mt-4 font-semibold text-white">
-                {title}
-              </h3>
+                <p className="mt-2 text-sm text-slate-400">
+                  {description}
+                </p>
 
-              <p className="mt-2 text-sm text-slate-400">
-                {description}
-              </p>
-
-              <p className="mt-4 text-xs text-slate-500">
-                {status}
-              </p>
-            </article>
-          ))}
+                <p className="mt-4 text-xs text-slate-500">
+                  {status}
+                </p>
+              </Link>
+            )
+          )}
         </div>
       </section>
 
+      {/* RECOMMENDED ACTION */}
+
       <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
-        <h2 className="font-bold text-white">Recommended Action</h2>
+        <h2 className="font-bold text-white">
+          Recommended Action
+        </h2>
 
         <p className="mt-2 text-sm text-slate-400">
-          Recommended plans, reasons, risk levels and human approval
-          decisions will appear here when connected to the backend.
+          Recommended plans, reasons, risk levels and human
+          approval decisions will appear here when connected
+          to the backend.
         </p>
 
         <p className="mt-3 text-xs text-amber-400">

@@ -3,6 +3,7 @@ from app.database.database import (
     initialize_workflow_table,
     initialize_permission_requests_table,
     initialize_audit_logs_table,
+    initialize_action_proposals_table,
 )
 
 
@@ -11,5 +12,6 @@ if __name__ == "__main__":
     initialize_workflow_table()
     initialize_permission_requests_table()
     initialize_audit_logs_table()
+    initialize_action_proposals_table()
 
     print("Database initialized successfully.")

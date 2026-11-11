@@ -1,5 +1,3 @@
-import sqlite3
-
 from pydantic import BaseModel, Field, model_validator
 
 from app.database.connection import get_db_connection
@@ -33,6 +31,7 @@ class GateAvailabilityResult(BaseModel):
     conflicting_flights: list[str] = Field(default_factory=list)
     alternative_gates: list[str] = Field(default_factory=list)
 
+
 def check_gate_availability(
     request: GateAvailabilityRequest,
 ) -> GateAvailabilityResult:
@@ -42,19 +41,25 @@ def check_gate_availability(
     try:
         rows = connection.execute(
             """
-            SELECT airport_code, flight_number, gate_id,
-                   start_minute, end_minute
+            SELECT
+                airport_code,
+                flight_number,
+                gate_id,
+                start_minute,
+                end_minute
             FROM gate_assignments
             WHERE airport_code = ?
               AND gate_id = ?
               AND start_minute < ?
               AND end_minute > ?
+              AND flight_number != ?
             """,
             (
                 request.airport_code,
                 request.gate_id,
                 request.end_minute,
                 request.start_minute,
+                request.flight_number,
             ),
         ).fetchall()
 
@@ -73,17 +78,19 @@ def check_gate_availability(
 
     for row in rows:
         existing_assignment = GateAssignment(
-            airport_code=row[0],
-            flight_number=row[1],
-            gate_id=row[2],
-            start_minute=row[3],
-            end_minute=row[4],
+            airport_code=row["airport_code"],
+            flight_number=row["flight_number"],
+            gate_id=row["gate_id"],
+            start_minute=row["start_minute"],
+            end_minute=row["end_minute"],
         )
 
-        if detect_gate_conflict(
+        conflict_result = detect_gate_conflict(
             requested_assignment,
             existing_assignment,
-        ):
+        )
+
+        if conflict_result.conflict_detected:
             conflicting_flights.append(
                 existing_assignment.flight_number
             )
@@ -95,7 +102,8 @@ def check_gate_availability(
         available=len(conflicting_flights) == 0,
         conflicting_flights=conflicting_flights,
     )
-    
+
+
 def find_alternative_gates(
     request: GateAvailabilityRequest,
     candidate_gates: list[str],

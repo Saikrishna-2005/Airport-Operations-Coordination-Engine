@@ -5,10 +5,18 @@ from app.rule_engine.schemas import (
     RuleEvaluationResponse,
     RuleResult,
 )
+
 from app.rule_engine.rules import (
     evaluate_delay_rule,
     evaluate_rainfall_rule,
     evaluate_runway_rule,
+    evaluate_gate_conflict_rule,
+    evaluate_staff_availability_rule,
+    evaluate_permission_validation_rule,
+)
+
+from app.rule_engine.decision_support import (
+    evaluate_decision_support,
 )
 
 
@@ -30,6 +38,9 @@ def evaluate_operational_rules(
         evaluate_delay_rule,
         evaluate_rainfall_rule,
         evaluate_runway_rule,
+        evaluate_gate_conflict_rule,
+        evaluate_staff_availability_rule,
+        evaluate_permission_validation_rule,
     ]
 
     results: list[RuleResult] = [
@@ -46,10 +57,13 @@ def evaluate_operational_rules(
         triggered_count,
     )
 
+    decision = evaluate_decision_support(results)
+
     return RuleEvaluationResponse(
         airport_code=data.airport_code,
         flight_number=data.flight_number,
         triggered_rules=triggered_count,
         results=results,
+        decision_support=decision,
         advisory_only=True,
     )

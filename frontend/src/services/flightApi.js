@@ -480,3 +480,116 @@ export const generateAIPlanning = async (flight, options = {}) => {
 
   return response.data;
 };
+
+
+// ============================================================
+// GET LIVE AIRCRAFT TELEMETRY FROM OPENSKY
+// Endpoint: GET /api/flights/live
+// This is separate from operational SQLite flight records.
+// ============================================================
+
+export const getLiveAircraft = async ({
+  airport = "DEL",
+  mode,
+  radiusDeg = 0.5,
+} = {}) => {
+  const params = {
+    airport: String(airport || "DEL").trim().toUpperCase(),
+    radius_deg: Number(radiusDeg),
+  };
+
+  if (mode) {
+    params.mode = mode;
+  }
+
+  if (!Number.isFinite(params.radius_deg) || params.radius_deg <= 0) {
+    throw new Error("Aircraft coverage radius must be a positive number.");
+  }
+
+  try {
+    const response = await apiClient.get("/api/flights/live", { params });
+    const data = response.data;
+
+    if (!data || !Array.isArray(data.aircraft)) {
+      throw new Error("Invalid live aircraft response received from backend.");
+    }
+
+    return data;
+  } catch (error) {
+    console.error("[Flight Operations] Failed to fetch live aircraft:", error);
+    throw error;
+  }
+};
+
+
+// ============================================================
+// OPENSKY HISTORICAL FLIGHT INTELLIGENCE
+// These endpoints are separate from the operational SQLite flight list.
+// Historical airport/interval results are estimates, not official schedules.
+// ============================================================
+
+const validateUnixWindow = (begin, end) => {
+  const start = Number(begin);
+  const finish = Number(end);
+  if (!Number.isInteger(start) || !Number.isInteger(finish) || start <= 0 || finish <= start) {
+    throw new Error("Valid Unix timestamps are required: end must be greater than begin.");
+  }
+  return { begin: start, end: finish };
+};
+
+const getHistoricalList = async (path, params, label) => {
+  try {
+    const response = await apiClient.get(path, { params });
+    return response.data;
+  } catch (error) {
+    console.error(`[Flight Operations] Failed to fetch ${label}:`, error);
+    throw error;
+  }
+};
+
+/** Estimated historical arrivals for an airport. */
+export const getHistoricalArrivals = async ({ airport = "VIDP", begin, end } = {}) => {
+  const window = validateUnixWindow(begin, end);
+  return getHistoricalList("/api/flights/history/arrivals", {
+    airport: String(airport).trim().toUpperCase(), ...window,
+  }, "historical arrivals");
+};
+
+/** Estimated historical departures for an airport. */
+export const getHistoricalDepartures = async ({ airport = "VIDP", begin, end } = {}) => {
+  const window = validateUnixWindow(begin, end);
+  return getHistoricalList("/api/flights/history/departures", {
+    airport: String(airport).trim().toUpperCase(), ...window,
+  }, "historical departures");
+};
+
+/** Historical state observations for one aircraft ICAO24 address. */
+export const getAircraftHistory = async ({ icao24, begin, end } = {}) => {
+  const window = validateUnixWindow(begin, end);
+  const address = String(icao24 || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{6}$/.test(address)) {
+    throw new Error("ICAO24 must be a six-character hexadecimal address.");
+  }
+  return getHistoricalList(`/api/flights/history/aircraft/${encodeURIComponent(address)}`, window, "aircraft history");
+};
+
+/** Aircraft observed during a Unix-time interval (may include global traffic). */
+export const getHistoricalInterval = async ({ begin, end } = {}) => {
+  const window = validateUnixWindow(begin, end);
+  return getHistoricalList("/api/flights/history/interval", window, "historical interval flights");
+};
+
+/**
+ * Fetch an aircraft trajectory. Pass the query fields supported by the backend,
+ * e.g. { time } or { begin, end }; backend route is /tracks/{icao24}.
+ */
+export const getAircraftTrack = async ({ icao24, ...query } = {}) => {
+  const address = String(icao24 || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{6}$/.test(address)) {
+    throw new Error("ICAO24 must be a six-character hexadecimal address.");
+  }
+  if (Object.keys(query).length === 0) {
+    throw new Error("Provide the trajectory time query supported by the backend.");
+  }
+  return getHistoricalList(`/api/flights/tracks/${encodeURIComponent(address)}`, query, "aircraft trajectory");
+};

@@ -253,22 +253,20 @@ def get_staff_shifts(staff_id: str) -> list[dict]:
 # GET STAFF ASSIGNMENTS
 # ============================================================
 
-def get_staff_assignments(staff_id: str) -> list[dict]:
-    """
-    Retrieve existing assignments for a staff member.
-
-    This function remains compatible with the existing
-    staff availability checker.
-    """
+def get_staff_assignments(
+    staff_id: str,
+    airport_code: str | None = None,
+) -> list[dict]:
+    """Retrieve assignments for a staff member at an airport."""
 
     connection = get_db_connection()
 
     try:
-        rows = connection.execute(
-            """
+        query = """
             SELECT
                 id,
                 staff_id,
+                airport_code,
                 assignment_date,
                 gate_id,
                 task_name,
@@ -276,16 +274,32 @@ def get_staff_assignments(staff_id: str) -> list[dict]:
                 end_minute
             FROM staff_assignments
             WHERE staff_id = ?
+        """
+
+        parameters = [staff_id]
+
+        if airport_code is not None:
+            query += """
+                AND (
+                    airport_code = ?
+                    OR airport_code IS NULL
+                )
+            """
+            parameters.append(airport_code.strip().upper())
+
+        query += """
             ORDER BY assignment_date, start_minute
-            """,
-            (staff_id,),
+        """
+
+        rows = connection.execute(
+            query,
+            parameters,
         ).fetchall()
 
         return [dict(row) for row in rows]
 
     finally:
         connection.close()
-
 
 # ============================================================
 # AIRPORT-SPECIFIC STAFF ASSIGNMENT HISTORY

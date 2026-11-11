@@ -354,3 +354,7 @@ Milestone 1 establishes the initial foundation of the Airport Operations Coordin
 The implementation provides a basis for future development while allowing the current workflow and its outputs to be tested and reviewed.
 
 **Final Milestone 1 completion should be confirmed against the project requirements agreed upon with the mentor.**
+
+## Research Agent integration
+
+The Research Agent is now integrated into the existing FastAPI/LangGraph backend. See `RESEARCH_AGENT_INTEGRATION.md` for endpoint usage, configuration, and safety boundaries. The direct endpoint is `POST /api/research/execute`; the existing airport workflow also invokes research before the Planning Agent and passes the resulting evidence into its operational context.

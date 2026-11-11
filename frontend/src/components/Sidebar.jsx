@@ -9,11 +9,11 @@ import {
   Layers,
   Settings,
   ShieldCheck,
+  ClipboardCheck,
 } from "lucide-react";
 
 import { NavLink } from "react-router-dom";
 
-// Existing navigation items
 const menuItems = [
   { label: "Overview", icon: LayoutDashboard, path: "/" },
   { label: "Flights", icon: Plane, path: "/flights" },
@@ -25,7 +25,12 @@ const menuItems = [
   { label: "Agent Monitoring", icon: Activity, path: "/agent-monitoring" },
 ];
 
-// New Admin-only navigation item
+const actionProposalMenuItem = {
+  label: "Action Proposals",
+  icon: ClipboardCheck,
+  path: "/action-proposals",
+};
+
 const adminMenuItem = {
   label: "User Management",
   icon: ShieldCheck,
@@ -33,14 +38,21 @@ const adminMenuItem = {
 };
 
 export default function Sidebar({ userRole }) {
-  // Show User Management only to administrators
-  const visibleMenuItems =
-    userRole === "admin"
-      ? [...menuItems, adminMenuItem]
-      : menuItems;
+  const visibleMenuItems = [
+    ...menuItems,
+
+    ...(userRole === "admin" || userRole === "operator"
+      ? [actionProposalMenuItem]
+      : []),
+
+    ...(userRole === "admin"
+      ? [adminMenuItem]
+      : []),
+  ];
 
   return (
     <aside className="flex min-h-screen w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-950 p-5 text-white">
+
       <div className="mb-10">
         <div className="mb-2 flex items-center gap-3">
           <Plane className="text-sky-400" size={28} />
@@ -101,6 +113,7 @@ export default function Sidebar({ userRole }) {
           Airport Operations v1.0
         </p>
       </div>
+
     </aside>
   );
 }

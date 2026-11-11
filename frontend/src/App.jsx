@@ -26,6 +26,7 @@ import UserManagement from "./pages/UserManagement";
 
 // NEW: Staff Assignment History
 import StaffAssignmentHistory from "./components/StaffAssignmentHistory";
+import ActionProposals from "./pages/ActionProposals";
 
 // ============================================================
 // PROTECTED DASHBOARD LAYOUT
@@ -258,6 +259,18 @@ function ProtectedLayout() {
               <Route
                 path="/ai-decisions"
                 element={<AIDecisions />}
+              />
+
+              <Route
+                path="/action-proposals"
+                element={
+                  currentUser.role === "admin" ||
+                  currentUser.role === "operator" ? (
+                    <ActionProposals userRole={currentUser.role} />
+                  ) : (
+                    <Navigate to="/" replace />
+                  )
+                }
               />
 
               <Route

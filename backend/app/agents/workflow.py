@@ -8,7 +8,11 @@ from langgraph.graph import StateGraph, START, END
 from app.agents.planning_agent import run_planning_agent
 
 from app.rule_engine.engine import evaluate_operational_rules
-from app.rule_engine.schemas import OperationalInput
+from app.rule_engine.schemas import (
+    OperationalInput,
+    GateAssignmentInput,
+)
+from app.database.connection import get_db_connection
 
 from app.tools.gate_availability_tool import (
     GateAvailabilityRequest,
@@ -20,6 +24,12 @@ from app.database.flight_database import get_all_flights
 from app.database.runway_database import get_runway_status
 
 from app.tools.weather_data_tool import get_weather_data
+from app.research_agent.agent import run_research_agent
+from app.research_agent.config import settings as research_settings
+from app.research_agent.schemas import (
+    DataMode, DisruptionType, ResearchRequest,
+)
+from uuid import uuid4
 
 
 # =========================================================
@@ -33,9 +43,13 @@ class AirportWorkflowState(TypedDict):
     affected_flights: list[str]
 
     planning_result: NotRequired[dict]
+    research_result: NotRequired[dict]
 
     gate_request: NotRequired[dict]
     gate_result: NotRequired[dict]
+    permission_request_id: NotRequired[str]
+    requested_by: NotRequired[str]
+    staff_availability_checks: NotRequired[list[dict]]
 
     runway_code: NotRequired[str | None]
 
@@ -53,6 +67,7 @@ def planning_node(state: AirportWorkflowState) -> dict:
 
     operational_information = {
         "rule_results": state.get("rule_results", []),
+        "research_result": state.get("research_result"),
         "advisory_only": True,
     }
 
@@ -234,6 +249,50 @@ def resolve_runway_availability(
     }
 
 
+def get_overlapping_gate_assignments(
+    request: GateAvailabilityRequest,
+) -> list[GateAssignmentInput]:
+    """
+    Retrieve existing SQLite gate assignments that overlap
+    with the requested flight's gate and time interval.
+    """
+
+    connection = get_db_connection()
+
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                airport_code,
+                flight_number,
+                gate_id,
+                start_minute,
+                end_minute
+            FROM gate_assignments
+            WHERE airport_code = ?
+              AND gate_id = ?
+              AND start_minute < ?
+              AND end_minute > ?
+              AND flight_number != ?
+            """,
+            (
+                request.airport_code,
+                request.gate_id,
+                request.end_minute,
+                request.start_minute,
+                request.flight_number,
+            ),
+        ).fetchall()
+
+        return [
+            GateAssignmentInput.model_validate(dict(row))
+            for row in rows
+        ]
+
+    finally:
+        connection.close()
+
+
 # =========================================================
 # RULE ENGINE
 # =========================================================
@@ -372,35 +431,63 @@ def rule_engine_node(
     rule_results = []
 
     for flight_number in state["affected_flights"]:
-
         normalized_number = flight_number.strip().upper()
-
-        matches = flight_lookup.get(
-            normalized_number,
-            [],
-        )
-
-        if not matches:
-            raise ValueError(
-                f"Flight {flight_number} was not found "
-                "in the database."
-            )
+        matches = flight_lookup.get(normalized_number, [])
 
         if len(matches) > 1:
             raise ValueError(
-                f"Multiple database records match "
-                f"flight {flight_number}. "
-                "Use a unique flight identifier."
+                f"Multiple database records found for flight {flight_number}."
             )
 
-        flight_record = matches[0]
+        # Determine delay information from SQLite when available.
+        if matches:
+            flight_record = matches[0]
+            raw_delay = flight_record.get("delay_minutes")
 
-        delay_minutes = int(
-            flight_record.get("delay_minutes") or 0
-        )
+            delay_minutes = (
+                int(raw_delay) if raw_delay is not None else None
+            )
+
+            delay_source = "SQLITE_FLIGHT_DATABASE"
+
+        else:
+            # Aircraft may exist in live OpenSky data without a SQLite record.
+            flight_record = None
+            delay_minutes = None
+            delay_source = "UNAVAILABLE_NOT_IN_SQLITE"
 
         # -------------------------------------------------
-        # 6. BUILD VALIDATED OPERATIONAL INPUT
+        # 5A. RETRIEVE GATE ASSIGNMENT EVIDENCE
+        # -------------------------------------------------
+
+        gate_assignment = None
+        existing_gate_assignments = None
+
+        gate_data = state.get("gate_request")
+
+        if gate_data:
+            gate_request = GateAvailabilityRequest.model_validate(
+                gate_data
+            )
+
+            if (
+                gate_request.flight_number.strip().upper()
+                == normalized_number
+            ):
+                gate_assignment = GateAssignmentInput(
+                    airport_code=gate_request.airport_code,
+                    flight_number=gate_request.flight_number,
+                    gate_id=gate_request.gate_id,
+                    start_minute=gate_request.start_minute,
+                    end_minute=gate_request.end_minute,
+                )
+
+                existing_gate_assignments = (
+                    get_overlapping_gate_assignments(gate_request)
+                )
+
+        # -------------------------------------------------
+        # 5B. BUILD OPERATIONAL INPUT
         # -------------------------------------------------
 
         operational_input = OperationalInput(
@@ -409,52 +496,54 @@ def rule_engine_node(
             delay_minutes=delay_minutes,
             rainfall_mm=rainfall_mm,
             runway_available=runway_available,
+            gate_assignment=gate_assignment,
+            existing_gate_assignments=existing_gate_assignments,
+            staff_availability_checks=state.get(
+                "staff_availability_checks"
+            ),
+            permission_request_id=state.get("permission_request_id"),
+            requested_by=state.get("requested_by"),
         )
 
-        # -------------------------------------------------
-        # 7. EXECUTE RULE ENGINE
-        # -------------------------------------------------
+        result = evaluate_operational_rules(operational_input)
 
-        result = evaluate_operational_rules(
-            operational_input
-        )
+        rule_results.append({
+            **result.model_dump(),
+            "operational_inputs": {
+                "delay_minutes": delay_minutes,
+                "rainfall_mm": rainfall_mm,
+                "runway_available": runway_available,
+                "gate_assignment": (
+                    gate_assignment.model_dump()
+                    if gate_assignment else None
+                ),
+                "existing_gate_assignments": (
+                    [
+                        assignment.model_dump()
+                        for assignment in existing_gate_assignments
+                    ]
+                    if existing_gate_assignments is not None
+                    else None
+                ),
+            },
+            "input_sources": {
+                "delay_minutes": delay_source,
+                "rainfall_mm": "OPEN_METEO",
+                "runway_available": runway_info["source"],
+            },
+            "weather_metadata": {
+                "source": weather.get("source"),
+                "observation_time": observation_time,
+                "retrieved_at": weather.get("retrieved_at"),
+                "cached": weather.get("cached", False),
+                "observation_age_minutes": round(
+                    observation_age_minutes, 2
+                ),
+            },
+            "runway_metadata": runway_info,
+            "advisory_only": True,
+        })
 
-        # -------------------------------------------------
-        # 8. BUILD RESPONSE
-        # -------------------------------------------------
-
-        rule_results.append(
-            {
-                **result.model_dump(),
-
-                "operational_inputs": {
-                    "delay_minutes": delay_minutes,
-                    "rainfall_mm": rainfall_mm,
-                    "runway_available": runway_available,
-                },
-
-                "input_sources": {
-                    "delay_minutes": "SQLITE_FLIGHT_DATABASE",
-                    "rainfall_mm": "OPEN_METEO",
-                    "runway_available": runway_info["source"],
-                },
-
-                "weather_metadata": {
-                    "source": weather.get("source"),
-                    "observation_time": observation_time,
-                    "retrieved_at": weather.get("retrieved_at"),
-                    "cached": weather.get("cached", False),
-                    "observation_age_minutes": round(
-                        observation_age_minutes,
-                        2,
-                    ),
-                },
-
-                "runway_metadata": runway_info,
-
-                "advisory_only": True,
-            }
-        )
 
     return {
         "rule_results": rule_results,
@@ -465,12 +554,58 @@ def rule_engine_node(
 
 
 # =========================================================
+# RESEARCH AGENT
+# =========================================================
+
+def _classify_disruption(value: str) -> DisruptionType:
+    text = value.lower()
+    if any(word in text for word in ("weather", "rain", "wind", "storm", "fog", "visibility")):
+        return DisruptionType.weather
+    if any(word in text for word in ("delay", "late", "schedule")):
+        return DisruptionType.delay
+    if any(word in text for word in ("runway", "closure", "surface")):
+        return DisruptionType.runway
+    return DisruptionType.other
+
+
+def research_agent_node(state: AirportWorkflowState) -> dict:
+    """Collect weather/flight evidence before the Planning Agent reasons."""
+    request = ResearchRequest(
+        request_id=str(uuid4()),
+        workflow_id=state["workflow_id"],
+        airport_code=state["airport"],
+        disruption_type=_classify_disruption(state["disruption"]),
+        disruption_description=state["disruption"],
+        affected_flights=state["affected_flights"],
+        research_requirements=[
+            "current weather conditions, wind, visibility and precipitation",
+            "current aircraft position for affected flights",
+            "aircraft altitude and velocity",
+            "aircraft heading and ground status",
+        ],
+        planning_objective="Gather evidence to support the airport disruption planning workflow.",
+        as_of=datetime.now(timezone.utc),
+        data_mode=DataMode(research_settings.DATA_MODE),
+    )
+    result = run_research_agent(request)
+    return {
+        "research_result": result.model_dump(mode="json"),
+        "status": "research_completed_" + result.status.value,
+    }
+
+
+# =========================================================
 # BUILD LANGGRAPH WORKFLOW
 # =========================================================
 
 def build_airport_workflow():
 
     graph = StateGraph(AirportWorkflowState)
+
+    graph.add_node(
+        "research_agent",
+        research_agent_node,
+    )
 
     graph.add_node(
         "planning_agent",
@@ -499,6 +634,11 @@ def build_airport_workflow():
 
     graph.add_edge(
         "rule_engine",
+        "research_agent",
+    )
+
+    graph.add_edge(
+        "research_agent",
         "planning_agent",
     )
 

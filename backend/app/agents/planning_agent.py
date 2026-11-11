@@ -37,7 +37,8 @@ def run_planning_agent(
     llm = get_llm()
 
     structured_llm = llm.with_structured_output(
-        PlanningResult
+        PlanningResult,
+        method="function_calling"
     )
 
     planning_chain = (

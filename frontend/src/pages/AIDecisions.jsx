@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BrainCircuit,
   Plane,
@@ -13,7 +13,13 @@ import {
   CloudRain,
   ListChecks,
   FileText,
+  ArrowRight,
+  ClipboardCheck,
 } from "lucide-react";
+
+import { useNavigate } from "react-router-dom";
+
+import { getActionProposals } from "../services/actionProposalApi";
 
 import api from "../api";
 
@@ -312,6 +318,11 @@ function WorkflowSummary({ workflow }) {
 }
 
 export default function AIDecisions() {
+
+  const navigate = useNavigate();
+  const [proposalSummary, setProposalSummary] = useState(null);
+  const [proposalSummaryLoading, setProposalSummaryLoading] =
+    useState(false);
   const [airport, setAirport] = useState("VGA");
   const [disruption, setDisruption] = useState("");
   const [affectedFlights, setAffectedFlights] = useState("");
@@ -474,6 +485,74 @@ export default function AIDecisions() {
   }
 
   const displayedWorkflow = retrievedWorkflow || workflow;
+
+  const currentWorkflowId = displayedWorkflow?.workflow_id;
+
+  useEffect(() => {
+    if (!currentWorkflowId) {
+      setProposalSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadProposalSummary() {
+      setProposalSummaryLoading(true);
+
+      try {
+        const data = await getActionProposals();
+
+        const matchingProposals = (
+          Array.isArray(data) ? data : []
+        ).filter(
+          (proposal) =>
+            proposal.workflow_id === currentWorkflowId
+        );
+
+        if (!cancelled) {
+          setProposalSummary({
+            total: matchingProposals.length,
+
+            validated: matchingProposals.filter(
+              (item) => item.validation_status === "validated"
+            ).length,
+
+            pending: matchingProposals.filter(
+              (item) => item.approval_status === "pending"
+            ).length,
+
+            approved: matchingProposals.filter(
+              (item) => item.approval_status === "approved"
+            ).length,
+
+            rejected: matchingProposals.filter(
+              (item) => item.approval_status === "rejected"
+            ).length,
+
+            notStarted: matchingProposals.filter(
+              (item) => item.execution_status === "not_started"
+            ).length,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to load proposal summary:", error);
+
+        if (!cancelled) {
+          setProposalSummary(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setProposalSummaryLoading(false);
+        }
+      }
+    }
+
+  loadProposalSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkflowId]);
 
   const ruleResults = displayedWorkflow?.rule_results || [];
   const planningResult = displayedWorkflow?.planning_result;
@@ -714,6 +793,90 @@ export default function AIDecisions() {
 
             <RuleEngineResults ruleResults={ruleResults} />
           </section>
+
+          {/* ACTION PROPOSAL SUMMARY */}
+
+          {currentWorkflowId && (
+  <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+
+    <div className="flex flex-wrap items-center justify-between gap-4">
+
+      <div>
+        <h3 className="text-lg font-semibold text-white">
+          Action Proposal Summary
+        </h3>
+
+        <p className="mt-1 text-sm text-slate-400">
+          Proposals generated from this AI decision workflow.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() =>
+          navigate(
+            `/action-proposals?workflow_id=${encodeURIComponent(
+              currentWorkflowId
+            )}`
+          )
+        }
+        className="flex items-center gap-2 rounded-lg bg-sky-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-300"
+      >
+        <ClipboardCheck size={18} />
+
+        View Action Proposals
+
+        <ArrowRight size={16} />
+      </button>
+
+    </div>
+
+    {proposalSummaryLoading ? (
+
+      <p className="mt-5 text-sm text-slate-400">
+        Loading proposal summary...
+      </p>
+
+    ) : proposalSummary ? (
+
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+
+        {[
+          ["Generated", proposalSummary.total],
+          ["Validated", proposalSummary.validated],
+          ["Pending", proposalSummary.pending],
+          ["Approved", proposalSummary.approved],
+          ["Rejected", proposalSummary.rejected],
+          ["Not Started", proposalSummary.notStarted],
+        ].map(([label, value]) => (
+
+          <div
+            key={label}
+            className="rounded-lg bg-slate-950 p-4"
+          >
+            <p className="text-xs text-slate-400">
+              {label}
+            </p>
+
+            <p className="mt-2 text-2xl font-bold text-white">
+              {value}
+            </p>
+          </div>
+
+        ))}
+
+      </div>
+
+    ) : (
+
+      <p className="mt-5 text-sm text-slate-400">
+        Proposal summary is currently unavailable.
+      </p>
+
+    )}
+
+  </section>
+)}
 
           <p className="text-xs leading-5 text-slate-500">
             Operational note: Planning and rule engine outputs are

@@ -240,7 +240,10 @@ def check_staff_availability(
     # 7. CHECK EXISTING ASSIGNMENT CONFLICTS
     # --------------------------------------------------------
 
-    assignments = get_staff_assignments(staff_id)
+    assignments = get_staff_assignments(
+        staff_id=staff_id,
+        airport_code=airport_code,
+    )
 
     for assignment in assignments:
         assignment_start = _to_datetime(

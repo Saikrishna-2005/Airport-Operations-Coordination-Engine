@@ -11,11 +11,19 @@ def main():
             "Heavy rainfall has been reported. "
             "Potential flight delays need investigation."
         ),
-        "affected_flights": ["AI501", "AI502"],
+        "affected_flights": ["TEST-FLT-001", "TEST-FLT-002"],
+
+        "gate_request": {
+            "airport_code": "HYD",
+            "flight_number": "TEST-FLT-001",
+            "gate_id": "G1",
+            "start_minute": 600,
+            "end_minute": 660,
+        },
+
         "planning_result": {},
         "status": "planning_started",
     }
-
     result = workflow.invoke(initial_state)
 
     print("\n--- AIRPORT OPERATIONS WORKFLOW RESULT ---")

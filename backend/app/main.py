@@ -4,6 +4,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.logger import logger
 
+from contextlib import asynccontextmanager
+
+from app.database.database import (
+    initialize_database,
+    initialize_workflow_table,
+    initialize_permission_requests_table,
+    initialize_audit_logs_table,
+    initialize_action_proposals_table,
+)
+
 # ============================================================
 # API ROUTER IMPORTS
 # ============================================================
@@ -36,6 +46,26 @@ from app.api.user_management import (
 
 from app.api.flights import router as flights_router
 from app.api.runways import router as runway_router
+from app.api.research import router as research_router
+from app.api.action_approval import router as action_approval_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initializing airport operations database...")
+
+    initialize_database()
+    initialize_workflow_table()
+    initialize_permission_requests_table()
+    initialize_audit_logs_table()
+    initialize_action_proposals_table()
+
+    logger.info("Database initialization completed successfully.")
+
+    yield
+
+    logger.info("Airport Operations API shutting down.")
+
 
 # ============================================================
 # FASTAPI APPLICATION
@@ -45,6 +75,7 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description="Backend APIs for Airport Operations Coordination",
+    lifespan=lifespan,
 )
 
 # ============================================================
@@ -94,6 +125,8 @@ app.include_router(user_management_router)
 app.include_router(ai_router)
 
 app.include_router(runway_router)
+app.include_router(research_router)
+app.include_router(action_approval_router)
 
 # ============================================================
 # HOME ENDPOINT

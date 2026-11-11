@@ -140,18 +140,55 @@ def initialize_workflow_table():
                 requested_by TEXT NOT NULL,
                 input_data TEXT NOT NULL,
                 decision TEXT,
+                planning_result TEXT,
+                rule_results TEXT,
+                research_result TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
 
+        # Check existing table columns
+        existing_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(workflows)"
+            ).fetchall()
+        }
+
+        # Safely add missing columns
+        required_columns = {
+            "planning_result": "TEXT",
+            "rule_results": "TEXT",
+            "research_result": "TEXT",
+        }
+
+        for column_name, column_type in required_columns.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    f"ALTER TABLE workflows ADD COLUMN "
+                    f"{column_name} {column_type}"
+                )
+
+                logger.info(
+                    "Added missing workflows column: %s",
+                    column_name
+                )
+
         connection.commit()
-        logger.info("Workflows table initialized successfully")
+
+        logger.info(
+            "Workflows table initialized successfully"
+        )
 
     except Exception:
         connection.rollback()
-        logger.exception("Failed to initialize workflows table")
+
+        logger.exception(
+            "Failed to initialize workflows table"
+        )
+
         raise
 
     finally:
@@ -216,6 +253,96 @@ def initialize_audit_logs_table():
     except Exception:
         connection.rollback()
         logger.exception("Failed to initialize audit logs table")
+        raise
+
+    finally:
+        connection.close()
+
+
+def initialize_action_proposals_table():
+    connection = get_db_connection()
+
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS action_proposals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                action_id TEXT UNIQUE NOT NULL,
+                workflow_id TEXT NOT NULL,
+                airport TEXT NOT NULL,
+
+                action_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                target_flight TEXT,
+
+                payload TEXT,
+
+                validation_status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (
+                        validation_status IN (
+                            'pending',
+                            'validated',
+                            'failed'
+                        )
+                    ),
+
+                approval_status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (
+                        approval_status IN (
+                            'pending',
+                            'approved',
+                            'rejected'
+                        )
+                    ),
+
+                execution_status TEXT NOT NULL DEFAULT 'not_started'
+                    CHECK (
+                        execution_status IN (
+                            'not_started',
+                            'completed',
+                            'failed'
+                        )
+                    ),
+
+                proposed_by TEXT,
+                reviewed_by TEXT,
+                review_comment TEXT,
+                execution_result TEXT,
+
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_action_proposals_workflow
+            ON action_proposals(workflow_id)
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_action_proposals_approval
+            ON action_proposals(approval_status)
+            """
+        )
+
+        connection.commit()
+
+        logger.info(
+            "Action proposals table initialized successfully"
+        )
+
+    except Exception:
+        connection.rollback()
+        logger.exception(
+            "Failed to initialize action proposals table"
+        )
         raise
 
     finally:

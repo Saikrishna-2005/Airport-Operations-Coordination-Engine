@@ -27,6 +27,11 @@ class WorkflowResponse(BaseModel):
 
     decision: str | None = None
 
+    # AI Agent Results
+    research_result: dict[str, Any] | None = None
+
     planning_result: dict[str, Any] | None = None
 
-    rule_results: list[dict[str, Any]] = Field(default_factory=list)
+    rule_results: list[dict[str, Any]] = Field(
+        default_factory=list
+    )

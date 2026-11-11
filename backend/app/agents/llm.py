@@ -1,12 +1,20 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-load_dotenv()
+
+# Locate backend/.env explicitly
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = BACKEND_DIR / ".env"
+
+# Ensure .env values override previously loaded environment values
+load_dotenv(dotenv_path=ENV_FILE, override=True)
 
 
 def get_llm():
+
     model_name = os.getenv("GEMINI_MODEL")
     api_key = os.getenv("GOOGLE_API_KEY")
 
@@ -15,6 +23,11 @@ def get_llm():
 
     if not api_key:
         raise ValueError("GOOGLE_API_KEY is missing from .env")
+
+    print("========== PLANNING LLM DEBUG ==========")
+    print("ENV FILE:", ENV_FILE)
+    print("SELECTED MODEL:", model_name)
+    print("========================================")
 
     return ChatGoogleGenerativeAI(
         model=model_name,

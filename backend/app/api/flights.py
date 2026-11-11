@@ -24,6 +24,11 @@ from app.database.flight_database import (
     get_flight_risk_factors,
 )
 
+from app.research_agent.tools.flight_tool import (
+    get_aircraft_in_area, get_arrivals_by_airport, get_departures_by_airport,
+    get_flights_by_aircraft, get_flights_from_interval, get_track_by_aircraft,
+)
+
 from app.schemas.flight import (
     FlightCreate,
     FlightUpdate,
@@ -135,6 +140,83 @@ def list_flights(
         ]
 
     return flights
+
+
+
+
+# ============================================================
+# GET LIVE AIRCRAFT DETECTED NEAR AN AIRPORT
+# ============================================================
+
+@router.get("/live")
+def list_live_aircraft(
+    airport: str = Query(default="DEL", min_length=3, max_length=4),
+    mode: str | None = Query(default=None, pattern="^(live|synthetic)$"),
+    radius_deg: float = Query(default=0.5, gt=0, le=5),
+):
+    """Return aircraft state vectors in an airport coverage area.
+
+    This endpoint is separate from '/' which continues to return SQLite
+    operational flight records.
+    """
+    from app.research_agent.config import settings as research_settings
+
+    selected_mode = mode or research_settings.DATA_MODE
+    result = get_aircraft_in_area(
+        airport_code=airport,
+        mode=selected_mode,
+        bounding_box_radius_deg=radius_deg,
+    )
+
+    if result.get("status") == "error":
+        error = result.get("error") or {}
+        code = error.get("code")
+        http_status = 404 if code == "AIRPORT_NOT_FOUND" else 502
+        raise HTTPException(status_code=http_status, detail=result)
+
+    return result
+
+
+
+# ============================================================
+# OPENSKY HISTORICAL ARRIVALS / DEPARTURES / AIRCRAFT HISTORY
+# ============================================================
+
+def _raise_opensky_error(result: dict):
+    if result.get("status") == "error":
+        error=result.get("error") or {}; code=error.get("code")
+        http_status=404 if code in {"AIRPORT_NOT_FOUND","AIRPORT_ICAO_REQUIRED"} else 422 if code and code.startswith("INVALID") else 502
+        raise HTTPException(status_code=http_status,detail=result)
+    return result
+
+
+@router.get("/history/arrivals")
+def airport_arrivals(airport: str=Query(...,min_length=3,max_length=4),begin: int=Query(...,gt=0),end: int=Query(...,gt=0)):
+    """Historical estimated arrivals. OpenSky records are batch-processed, not real-time."""
+    return _raise_opensky_error(get_arrivals_by_airport(airport,begin,end))
+
+
+@router.get("/history/departures")
+def airport_departures(airport: str=Query(...,min_length=3,max_length=4),begin: int=Query(...,gt=0),end: int=Query(...,gt=0)):
+    """Historical estimated departures. OpenSky records are batch-processed, not real-time."""
+    return _raise_opensky_error(get_departures_by_airport(airport,begin,end))
+
+
+@router.get("/history/aircraft/{icao24}")
+def aircraft_flight_history(icao24: str,begin: int=Query(...,gt=0),end: int=Query(...,gt=0)):
+    return _raise_opensky_error(get_flights_by_aircraft(icao24,begin,end))
+
+
+@router.get("/history/interval")
+def flights_in_interval(begin: int=Query(...,gt=0),end: int=Query(...,gt=0)):
+    """Historical flights within a maximum two-hour interval."""
+    return _raise_opensky_error(get_flights_from_interval(begin,end))
+
+
+@router.get("/tracks/{icao24}")
+def aircraft_track(icao24: str,timestamp: int=Query(default=0,ge=0)):
+    """Experimental aircraft trajectory from OpenSky."""
+    return _raise_opensky_error(get_track_by_aircraft(icao24,timestamp))
 
 
 # ============================================================

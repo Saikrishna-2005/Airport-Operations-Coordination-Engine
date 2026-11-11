@@ -13,6 +13,7 @@ router = APIRouter(
 
 
 class AIPlanningRequest(BaseModel):
+
     airport: str = Field(
         min_length=3,
         max_length=4,
@@ -40,10 +41,14 @@ class AIPlanningRequest(BaseModel):
 def generate_ai_plan(request: AIPlanningRequest):
 
     try:
+
+        # Generate unique workflow ID
         workflow_id = f"WF-{uuid4().hex[:8].upper()}"
 
+        # Build LangGraph workflow
         workflow = build_airport_workflow()
 
+        # Execute complete airport operations workflow
         result = workflow.invoke(
             {
                 "workflow_id": workflow_id,
@@ -55,23 +60,55 @@ def generate_ai_plan(request: AIPlanningRequest):
             }
         )
 
+        # Extract individual agent results
+        research_result = result.get("research_result")
+
+        planning_result = result.get("planning_result")
+
+        gate_result = result.get("gate_result")
+
+        rule_results = result.get("rule_results", [])
+
+        # Return complete workflow response
         return {
             "success": True,
+
             "workflow_id": workflow_id,
+
             "status": result.get("status"),
-            "planning_result": result.get("planning_result"),
-            "gate_result": result.get("gate_result"),
-            "rule_results": result.get("rule_results"),
+
+            "research_result": research_result,
+
+            "planning_result": planning_result,
+
+            "gate_result": gate_result,
+
+            "rule_results": rule_results,
+
+            "advisory_only": True,
         }
 
     except ValueError as error:
+
         raise HTTPException(
             status_code=400,
             detail=str(error),
         )
 
-    except Exception:
+    except Exception as error:
+
+        # Log actual exception in backend terminal
+        import logging
+
+        logging.exception(
+            "AI planning workflow failed: %s",
+            error,
+        )
+
         raise HTTPException(
             status_code=500,
-            detail="AI planning workflow failed. Check backend logs.",
+            detail=(
+                "AI planning workflow failed. "
+                "Check backend logs."
+            ),
         )

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
+
+from app.research_agent.tools.flight_integration import (
+    get_integrated_flights,
+)
 
 from app.research_agent.config import Settings, settings as global_settings
 from app.research_agent.graph import build_research_graph
@@ -16,7 +20,7 @@ from app.research_agent.schemas import (
     ResearchResult,
     ResultStatus,
 )
-from app.research_agent.tools.flight_tool import FlightToolOutput, get_flights
+from app.research_agent.tools.flight_tool import FlightToolOutput
 from app.research_agent.tools.weather_tool import WeatherToolOutput, get_weather
 
 
@@ -25,7 +29,7 @@ class AgentDependencies:
     """Injectable dependencies for research agent execution."""
 
     weather_fn: Callable[..., WeatherToolOutput] = get_weather
-    flight_fn: Callable[..., FlightToolOutput] = get_flights
+    flight_fn: Callable[..., FlightToolOutput] = get_integrated_flights
     settings: Settings = field(default_factory=lambda: global_settings)
     llm_factory: Callable[[], Any] | None = None
 
@@ -55,7 +59,9 @@ def run_research_agent(
     llm_instance = None
     llm_init_error: ErrorInfo | None = None
 
-    if deps.llm_factory is not None:
+    if request.data_mode == DataMode.live:
+        pass  # Live evidence stays local.
+    elif deps.llm_factory is not None:
         try:
             llm_instance = deps.llm_factory()
         except LLMConfigError as exc:

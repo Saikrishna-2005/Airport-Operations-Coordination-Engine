@@ -203,34 +203,151 @@ class WeatherResult(BaseModel):
         return _ensure_timezone_aware(v)
 
 
+# ============================================================
+# MULTI-PROVIDER FLIGHT INTELLIGENCE
+# ============================================================
+
+class FlightOperationalStatus(str, Enum):
+    """Normalized operational flight status."""
+
+    scheduled = "scheduled"
+    active = "active"
+    delayed = "delayed"
+    landed = "landed"
+    cancelled = "cancelled"
+    diverted = "diverted"
+    unknown = "unknown"
+
+
+class FlightOperationalData(BaseModel):
+    """Normalized operational flight information."""
+
+    flight_number: str | None = None
+    callsign: str | None = None
+    airline: str | None = None
+    icao24: str | None = None
+
+    origin_airport: str | None = None
+    destination_airport: str | None = None
+
+    status: FlightOperationalStatus = FlightOperationalStatus.unknown
+
+    scheduled_departure: datetime | None = None
+    scheduled_arrival: datetime | None = None
+
+    estimated_departure: datetime | None = None
+    estimated_arrival: datetime | None = None
+
+    actual_departure: datetime | None = None
+    actual_arrival: datetime | None = None
+
+    departure_delay_minutes: int | None = None
+    arrival_delay_minutes: int | None = None
+
+    departure_gate: str | None = None
+    arrival_gate: str | None = None
+
+    departure_terminal: str | None = None
+    arrival_terminal: str | None = None
+
+    @field_validator(
+        "scheduled_departure",
+        "scheduled_arrival",
+        "estimated_departure",
+        "estimated_arrival",
+        "actual_departure",
+        "actual_arrival",
+    )
+    @classmethod
+    def validate_timestamps(cls, v):
+        return _ensure_timezone_aware(v)
+
+
+class FlightFieldSource(BaseModel):
+    """Provenance of an individual flight information field."""
+
+    provider: str
+    source_id: str | None = None
+    data_timestamp: datetime | None = None
+
+    @field_validator("data_timestamp")
+    @classmethod
+    def validate_timestamp(cls, v):
+        return _ensure_timezone_aware(v)
+
+
+class FlightDataConflict(BaseModel):
+    """Conflict detected between flight data providers."""
+
+    field_name: str
+
+    primary_provider: str
+    secondary_provider: str
+
+    primary_value: Any = None
+    secondary_value: Any = None
+
+    selected_provider: str | None = None
+    selected_value: Any = None
+
+    reason: str
+    resolved: bool = False
+
+
+
+
 class FlightResult(BaseModel):
-    """Flight status evidence payload."""
+    """Single or multi-provider flight evidence payload."""
 
     requested_identifier: str = Field(
         ...,
-        description="Flight callsign or icao24 requested.",
+        description="Requested flight number or callsign.",
     )
+
     status: FlightLookupStatus = Field(
         ...,
-        description="Lookup status (found, not_found, unsupported, error).",
+        description="Flight lookup status.",
     )
-    provider: str = Field(..., description="Provider name (e.g. opensky).")
+
+    provider: str = Field(
+        ...,
+        description="Primary flight data provider.",
+    )
+
     data: dict[str, Any] = Field(
         default_factory=dict,
-        description="Aircraft state vectors actually supported by provider.",
+        description="Aircraft tracking and flight evidence.",
     )
-    data_timestamp: datetime | None = Field(
-        default=None,
-        description="Timestamp of state record.",
+
+    data_timestamp: datetime | None = None
+
+    source_id: str | None = None
+
+    # Multi-provider extensions
+
+    providers: list[str] = Field(default_factory=list)
+
+    operational_data: FlightOperationalData | None = None
+
+    source_ids: list[str] = Field(default_factory=list)
+
+    field_sources: dict[str, FlightFieldSource] = Field(
+        default_factory=dict,
     )
-    source_id: str | None = Field(
-        default=None,
-        description="Source identifier matching sources list.",
+
+    conflicts: list[FlightDataConflict] = Field(
+        default_factory=list,
+    )
+
+    missing_fields: list[str] = Field(
+        default_factory=list,
     )
 
     @field_validator("data_timestamp")
     @classmethod
-    def validate_data_timestamp_tz(cls, v: datetime | None) -> datetime | None:
+    def validate_data_timestamp_tz(
+        cls, v: datetime | None
+    ) -> datetime | None:
         return _ensure_timezone_aware(v)
 
 

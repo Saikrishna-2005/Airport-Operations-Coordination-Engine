@@ -144,6 +144,8 @@ const formatHistoricalTime = (value) => {
 const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 
 // Flight Operations Components
+import AirportBoard from "./AirportBoard";
+import { FlightIntelligence } from "../components/flight-operations/FlightIntelligence";
 import { OperationalPulse } from "../components/flight-operations/OperationalPulse";
 import { SearchFilter } from "../components/flight-operations/SearchFilter";
 import { FlightPriorityBoard } from "../components/flight-operations/FlightPriorityBoard";
@@ -411,21 +413,8 @@ export const FlightOperations = () => {
     loadData();
   }, [loadData]);
 
-  // Refresh both operational data and live aircraft telemetry every 60 seconds.
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      loadData(true);
-    }, 60_000);
+  // Manual refresh only: preserve trial API quota.
 
-    return () => clearInterval(intervalId);
-  }, [loadData]);
-
-  // Retry a failed connection after 15 seconds; the request lock prevents overlap.
-  useEffect(() => {
-    if (liveConnectionStatus !== "disconnected") return undefined;
-    const retryId = window.setTimeout(() => loadData(true), 15_000);
-    return () => window.clearTimeout(retryId);
-  }, [liveConnectionStatus, loadData]);
 
   const handleAirportSearch = (event) => {
     event.preventDefault();
@@ -955,6 +944,9 @@ export const FlightOperations = () => {
         </section>
 
         {/* ================================================= */}
+        <AirportBoard airport={selectedAirport} />
+        <FlightIntelligence airport={selectedAirport} />
+
         {/* HISTORICAL FLIGHT INTELLIGENCE */}
         {/* ================================================= */}
         <section className="rounded-2xl border border-violet-900/60 bg-slate-900/70 p-4 lg:p-5 space-y-4">

@@ -116,6 +116,8 @@ app.include_router(staff_shifts_router)
 app.include_router(weather_router)
 
 # Flight Operations
+from app.api.airport_board import router as airport_board_router
+app.include_router(airport_board_router)
 app.include_router(flights_router)
 
 # User Management

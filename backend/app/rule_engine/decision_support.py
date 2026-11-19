@@ -63,6 +63,27 @@ def evaluate_decision_support(
         if result.triggered
     ]
 
+    # Missing or unavailable evidence prevents GRANT.
+    if missing_rules or not_evaluated_rules:
+
+        if missing_rules:
+            reasons.append(
+                "Missing rule results: "
+                + ", ".join(sorted(missing_rules))
+            )
+
+        if not_evaluated_rules:
+            reasons.append(
+                "Some rules could not be evaluated: "
+                + ", ".join(sorted(set(not_evaluated_rules)))
+            )
+
+        return DecisionSupportResult(
+            decision="HOLD",
+            reasons=reasons,
+            evaluation_status="NOT_EVALUATED",
+        )
+
     # DELAY has the highest priority.
     delay_results = [
         result for result in triggered_results
@@ -90,27 +111,6 @@ def evaluate_decision_support(
         return DecisionSupportResult(
             decision="HOLD",
             reasons=reasons,
-        )
-
-    # Missing or unavailable evidence prevents GRANT.
-    if missing_rules or not_evaluated_rules:
-
-        if missing_rules:
-            reasons.append(
-                "Missing rule results: "
-                + ", ".join(sorted(missing_rules))
-            )
-
-        if not_evaluated_rules:
-            reasons.append(
-                "Some rules could not be evaluated: "
-                + ", ".join(sorted(set(not_evaluated_rules)))
-            )
-
-        return DecisionSupportResult(
-            decision="HOLD",
-            reasons=reasons,
-            evaluation_status="NOT_EVALUATED",
         )
 
     # All required rules were evaluated successfully.

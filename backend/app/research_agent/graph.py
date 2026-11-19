@@ -39,14 +39,35 @@ WEATHER_KEYWORDS = [
 
 FLIGHT_KEYWORDS = [
     "flight",
+    "flights",
     "aircraft",
     "aircraft state",
+    "tracking",
     "status",
     "delay",
+    "delays",
+    "delayed",
     "schedule",
+    "schedules",
+    "scheduled",
     "eta",
+    "etd",
     "arrival",
     "departure",
+    "gate",
+    "gates",
+    "terminal",
+    "terminals",
+    "cancellation",
+    "cancellations",
+    "cancelled",
+    "canceled",
+    "estimated",
+    "altitude",
+    "velocity",
+    "callsign",
+    "diverted",
+    "diversion",
 ]
 
 
@@ -221,6 +242,19 @@ def normalize_and_validate_evidence(state: ResearchState) -> dict[str, Any]:
         errors.extend(flight_out.errors)
 
         for flt in flight_out.flights:
+            for field_name in flt.missing_fields:
+                missing_info.append(
+                    f"Flight '{flt.requested_identifier}': "
+                    f"{field_name} unavailable."
+                )
+
+            for conflict in flt.conflicts:
+                if not conflict.resolved:
+                    missing_info.append(
+                        f"Flight '{flt.requested_identifier}': "
+                        f"Unresolved conflict in {conflict.field_name}. "
+                        f"{conflict.reason}"
+                    )
             if flt.status == FlightLookupStatus.not_found:
                 missing_info.append(f"Flight '{flt.requested_identifier}' not found in live aircraft states.")
             elif flt.status == FlightLookupStatus.unsupported:
@@ -296,36 +330,133 @@ def build_result(state: ResearchState) -> dict[str, Any]:
             )
         )
 
+    
     # 2. Flight findings
     if flight_out:
-        found_flights = [f for f in flight_out.flights if f.status == FlightLookupStatus.found and f.source_id]
-        if found_flights:
-            flight_has_evidence = True
 
-        for flt in found_flights:
-            assert flt.source_id is not None
-            f_data = flt.data
-            alt = f_data.get("baro_altitude")
-            spd = f_data.get("velocity")
-            ground = f_data.get("on_ground")
+        for flt in flight_out.flights:
 
-            state_desc = "on ground" if ground else f"airborne at baro altitude {alt}m (velocity {spd} m/s)"
-            finding_text = f"Flight '{flt.requested_identifier}' live state: {state_desc}."
+            if flt.status != FlightLookupStatus.found:
+                continue
 
-            limitations = [
-                "OpenSky provides live aircraft state vectors only; no commercial schedule or delay data."
-            ]
-            if is_synth:
-                limitations.append("Synthetic test fixture data.")
+            # OpenSky aircraft tracking findings
+            if flt.data and "on_ground" in flt.data:
 
-            findings.append(
-                Finding(
-                    finding=finding_text,
-                    evidence_refs=[flt.source_id],
-                    kind=FindingKind.provider_fact,
-                    limitations=limitations,
+                alt = flt.data.get("baro_altitude")
+                spd = flt.data.get("velocity")
+                ground = flt.data.get("on_ground")
+
+                details = []
+
+                if ground is True:
+                    details.append("on ground")
+                elif ground is False:
+                    details.append("airborne")
+
+                if alt is not None:
+                    details.append(f"barometric altitude {alt} m")
+
+                if spd is not None:
+                    details.append(f"velocity {spd} m/s")
+
+                tracking_source = flt.field_sources.get(
+                    "data.on_ground"
                 )
-            )
+
+                source_id = (
+                    tracking_source.source_id
+                    if tracking_source
+                    else flt.source_id
+                )
+
+                if source_id and details:
+
+                    flight_has_evidence = True
+
+                    findings.append(
+                        Finding(
+                            finding=(
+                                f"Flight '{flt.requested_identifier}' "
+                                f"aircraft state: "
+                                + ", ".join(details) + "."
+                            ),
+                            evidence_refs=[source_id],
+                            kind=FindingKind.provider_fact,
+                            limitations=[
+                                "Synthetic test fixture data."
+                                if is_synth
+                                else "Aircraft tracking observations."
+                            ],
+                        )
+                    )
+
+            # Cirium operational findings
+            op = flt.operational_data
+
+            if op is not None:
+
+                fields = {
+                    "status": "Operational status",
+                    "flight_number": "Flight number",
+                    "airline": "Airline",
+                    "origin_airport": "Origin airport",
+                    "destination_airport": "Destination airport",
+                    "departure_delay_minutes": "Departure delay (min)",
+                    "arrival_delay_minutes": "Arrival delay (min)",
+                    "departure_gate": "Departure gate",
+                    "arrival_gate": "Arrival gate",
+                    "departure_terminal": "Departure terminal",
+                    "arrival_terminal": "Arrival terminal",
+                    "scheduled_departure": "Scheduled departure",
+                    "scheduled_arrival": "Scheduled arrival",
+                    "estimated_departure": "Estimated departure",
+                    "estimated_arrival": "Estimated arrival",
+                    "actual_departure": "Actual departure",
+                    "actual_arrival": "Actual arrival",
+                }
+
+                for field_name, label in fields.items():
+
+                    value = getattr(op, field_name, None)
+
+                    if value is None or value == "unknown":
+                        continue
+
+                    attribution = flt.field_sources.get(
+                        f"operational_data.{field_name}"
+                    )
+
+                    if not attribution or not attribution.source_id:
+                        continue
+
+                    if hasattr(value, "value"):
+                        value = value.value
+
+                    if isinstance(value, datetime):
+                        value = value.isoformat()
+
+                    flight_has_evidence = True
+
+                    findings.append(
+                        Finding(
+                            finding=(
+                                f"Flight '{flt.requested_identifier}': "
+                                f"{label}: {value}."
+                            ),
+                            evidence_refs=[
+                                attribution.source_id
+                            ],
+                            kind=FindingKind.provider_fact,
+                            limitations=[
+                                "Synthetic test fixture data."
+                                if is_synth
+                                else (
+                                    "Provider-reported operational data; "
+                                    "subject to change."
+                                )
+                            ],
+                        )
+                    )
 
     # 3. Determine status
     if not required_tools:
@@ -339,7 +470,11 @@ def build_result(state: ResearchState) -> dict[str, Any]:
         flt_ok = flight_has_evidence if req_flt else True
 
         if wx_ok and flt_ok:
-            status = ResultStatus.success
+            status = (
+                ResultStatus.partial_success
+                if missing_info or errors
+                else ResultStatus.success
+            )
         elif weather_has_evidence or flight_has_evidence:
             status = ResultStatus.partial_success
         else:
@@ -373,6 +508,8 @@ def synthesize_research_result(state: ResearchState) -> dict[str, Any]:
     from app.research_agent.synthesis import synthesize
 
     req = state["request"]
+    if req.data_mode == DataMode.live:
+        return {}
     current_status = state.get("status")
 
     # Skip LLM entirely when there is no evidence (no_data or failed)
@@ -411,8 +548,15 @@ def synthesize_research_result(state: ResearchState) -> dict[str, Any]:
             for f in outcome.findings:
                 if f.kind == FindingKind.inference:
                     # Verify evidence_refs all exist in known sources
-                    if all(ref in known_source_ids for ref in f.evidence_refs):
-                        merged_findings.append(f)
+                    if (
+                            f.evidence_refs
+                            and f.limitations
+                            and all(
+                                ref in known_source_ids
+                                for ref in f.evidence_refs
+                            )
+                        ):
+                            merged_findings.append(f)
 
         return {
             "summary": new_summary,

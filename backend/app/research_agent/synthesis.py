@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Literal
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -22,13 +22,6 @@ from app.research_agent.schemas import (
 FORBIDDEN_KEYWORDS = [
     "metar",
     "speci",
-    "schedule",
-    "scheduled",
-    "delay",
-    "delays",
-    "delayed",
-    "gate",
-    "gates",
     "approve",
     "approved",
     "approval",
@@ -44,19 +37,19 @@ FORBIDDEN_KEYWORDS = [
 
 
 class LLMFinding(BaseModel):
-    """Structured finding emitted by the language model."""
+    """Evidence-grounded analytical inference."""
 
-    finding: str = Field(..., description="Finding statement.")
-    evidence_refs: list[str] = Field(default_factory=list, description="Citations to source_id.")
-    kind: FindingKind = Field(..., description="provider_fact or inference.")
-    limitations: list[str] = Field(default_factory=list, description="Caveats and limitations.")
+    finding: str = Field(..., min_length=1, description="Concise operational inference.")
+    evidence_refs: list[str] = Field(..., min_length=1, description="Supporting source identifiers.")
+    kind: Literal["inference"] = Field(..., description="Must always be inference.")
+    limitations: list[str] = Field(..., min_length=1, description="Explicit uncertainties and limitations.")
 
 
 class LLMSynthesis(BaseModel):
     """Structured response schema for LLM synthesis."""
 
-    summary: str = Field(..., description="Concise, source-grounded summary.")
-    findings: list[LLMFinding] = Field(default_factory=list, description="List of analytical findings.")
+    summary: str = Field(..., min_length=1, description="Concise, evidence-grounded summary.")
+    findings: list[LLMFinding] = Field(..., max_length=5, description="Zero to five analytical inferences.")
 
 
 class SynthesisOutcome(BaseModel):
@@ -84,6 +77,7 @@ def build_evidence_bundle(
             "disruption_description": request.disruption_description,
             "affected_flights": request.affected_flights,
             "research_requirements": request.research_requirements,
+            "planning_objective": request.planning_objective,
             "data_mode": request.data_mode.value,
             "as_of": request.as_of.isoformat() if request.as_of else None,
         },
@@ -196,10 +190,16 @@ def synthesize(
     ]
 
     try:
-        structured_llm = llm.with_structured_output(
-            LLMSynthesis,
-            method="function_calling",
-        )
+        if llm._llm_type == "chat-google-generative-ai":
+            structured_llm = llm.with_structured_output(
+                LLMSynthesis,
+                method="json_schema",
+            )
+        else:
+            structured_llm = llm.with_structured_output(
+                LLMSynthesis,
+                method="function_calling",
+            )
         response = structured_llm.invoke(messages)
     except Exception as exc:
         exc_name = type(exc).__name__.lower()
@@ -238,33 +238,43 @@ def synthesize(
 
     # Validate findings structure and citations
     validated_findings: list[Finding] = []
+
     for idx, f in enumerate(response.findings):
-        # provider_fact requires evidence_refs
-        if f.kind == FindingKind.provider_fact and not f.evidence_refs:
+        if (
+            f.kind != "inference"
+            or not f.finding.strip()
+            or not f.evidence_refs
+            or not f.limitations
+            or any(not item.strip() for item in f.limitations)
+        ):
             err = ErrorInfo(
                 tool="llm",
                 code="LLM_REJECTED_UNGROUNDED",
-                message=f"LLM finding at index {idx} has kind 'provider_fact' but no evidence_refs.",
+                message=(
+                    f"LLM finding at index {idx} "
+                    "violates inference grounding requirements."
+                ),
                 retryable=False,
             )
-            return SynthesisOutcome(used_llm=False, summary=None, findings=None, error=err)
+            return SynthesisOutcome(used_llm=False, error=err)
 
-        # evidence_ref existence
-        for ref in f.evidence_refs:
-            if ref not in known_source_ids:
-                err = ErrorInfo(
-                    tool="llm",
-                    code="LLM_REJECTED_UNGROUNDED",
-                    message=f"LLM finding at index {idx} cites unknown source_id '{ref}'.",
-                    retryable=False,
-                )
-                return SynthesisOutcome(used_llm=False, summary=None, findings=None, error=err)
+        if any(ref not in known_source_ids for ref in f.evidence_refs):
+            err = ErrorInfo(
+                tool="llm",
+                code="LLM_REJECTED_UNGROUNDED",
+                message=(
+                    f"LLM finding at index {idx} "
+                    "contains an unknown source identifier."
+                ),
+                retryable=False,
+            )
+            return SynthesisOutcome(used_llm=False, error=err)
 
         validated_findings.append(
             Finding(
-                finding=f.finding,
-                evidence_refs=f.evidence_refs,
-                kind=f.kind,
+                finding=f.finding.strip(),
+                evidence_refs=list(dict.fromkeys(f.evidence_refs)),
+                kind=FindingKind.inference,
                 limitations=f.limitations,
             )
         )

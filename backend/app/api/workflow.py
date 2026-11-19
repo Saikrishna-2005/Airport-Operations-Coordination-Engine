@@ -220,8 +220,8 @@ def start_workflow(
 
         decision_priority = {
             "GRANT": 1,
-            "HOLD": 2,
-            "DELAY": 3,
+            "HOLD": 3,
+            "DELAY": 2,
         }
 
         final_decision = None
@@ -234,6 +234,12 @@ def start_workflow(
                     0,
                 ),
             ).get("decision")
+
+        if (result.get("research_result") or {}).get("status") != "success":
+            final_decision = None
+
+        if (research_result or {}).get("data_mode") == "live" and final_decision == "GRANT":
+            final_decision = "HOLD"  # Live advisory only; no operational clearance.
 
         if not isinstance(planning_result, dict) or not planning_result:
             connection.execute(

@@ -239,11 +239,12 @@ def create_action_proposals(
     try:
         workflow = connection.execute(
             """
-            SELECT workflow_id
+            SELECT workflow_id, input_data
             FROM workflows
             WHERE workflow_id = ?
+              AND (requested_by = ? OR ? = 'admin')
             """,
-            (request.workflow_id,),
+            (request.workflow_id, current_user["user_id"], current_user["role"]),
         ).fetchone()
 
         if workflow is None:
@@ -252,6 +253,13 @@ def create_action_proposals(
                 detail="Workflow not found.",
             )
 
+        input_data = json.loads(workflow["input_data"])
+        if request.airport.strip().upper() != input_data["airport"].strip().upper():
+            raise HTTPException(status_code=422, detail="Airport must match workflow airport.")
+        affected = {f.strip().upper() for f in input_data.get("affected_flights", [])}
+        for action in request.actions:
+            if action.target_flight and action.target_flight.strip().upper() not in affected:
+                raise HTTPException(status_code=422, detail="Target flight does not belong to this workflow.")
         for action in request.actions:
 
             validation = validate_action(action)
@@ -345,10 +353,13 @@ def get_action_proposals(
     try:
         rows = connection.execute(
             """
-            SELECT *
-            FROM action_proposals
-            ORDER BY created_at DESC
-            """
+            SELECT a.*
+            FROM action_proposals AS a
+            JOIN workflows AS w ON w.workflow_id = a.workflow_id
+            WHERE w.requested_by = ? OR ? = 'admin'
+            ORDER BY a.created_at DESC
+            """,
+            (current_user["user_id"], current_user["role"]),
         ).fetchall()
 
         return [dict(row) for row in rows]

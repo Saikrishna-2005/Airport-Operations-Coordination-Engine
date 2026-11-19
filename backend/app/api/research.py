@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from app.core.dependencies import get_current_user
 from pydantic import BaseModel, Field
 
 from app.research_agent.agent import run_research_agent
@@ -44,8 +45,14 @@ def _disruption_type(description: str) -> DisruptionType:
 
 
 @router.post("/execute", response_model=ResearchResult)
-def execute_research(request: ResearchExecutionRequest) -> ResearchResult:
+def execute_research(
+    request: ResearchExecutionRequest,
+    current_user: dict = Depends(get_current_user),
+) -> ResearchResult:
     """Run evidence collection and synthesis. Output is advisory only."""
+    configured_mode = DataMode(research_settings.DATA_MODE)
+    if request.data_mode is not None and request.data_mode != configured_mode:
+        raise HTTPException(status_code=403, detail="Data mode override is not permitted.")
     try:
         research_request = ResearchRequest(
             request_id=str(uuid4()),
@@ -57,7 +64,7 @@ def execute_research(request: ResearchExecutionRequest) -> ResearchResult:
             research_requirements=request.research_requirements,
             planning_objective=request.planning_objective,
             as_of=datetime.now(timezone.utc),
-            data_mode=request.data_mode or DataMode(research_settings.DATA_MODE),
+            data_mode=configured_mode,
         )
         return run_research_agent(research_request)
     except ValueError as exc:

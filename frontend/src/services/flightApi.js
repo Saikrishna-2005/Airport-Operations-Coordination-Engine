@@ -593,3 +593,14 @@ export const getAircraftTrack = async ({ icao24, ...query } = {}) => {
   }
   return getHistoricalList(`/api/flights/tracks/${encodeURIComponent(address)}`, query, "aircraft trajectory");
 };
+
+// Read-only multi-provider intelligence; server controls data mode.
+export const getFlightIntelligence = async ({ airportCode, flightIdentifiers, signal } = {}) => {
+  const airport = String(airportCode || "").trim().toUpperCase();
+  if (!/^[A-Z]{3,4}$/.test(airport)) throw new Error("Enter a valid IATA or ICAO airport code.");
+  const identifiers = [...new Set((flightIdentifiers || []).map(v => String(v).trim().toUpperCase()).filter(Boolean))];
+  if (!identifiers.length || identifiers.length > 10 || identifiers.some(v => !/^[A-Z0-9]{1,16}$/.test(v))) throw new Error("Enter 1–10 valid flight identifiers.");
+  const { data } = await apiClient.post("/api/flights/intelligence", { airport_code: airport, flight_identifiers: identifiers }, { signal });
+  if (!data || !Array.isArray(data.flights) || !Array.isArray(data.errors) || !["live", "synthetic"].includes(data.data_mode)) throw new Error("Invalid flight intelligence response.");
+  return data;
+};

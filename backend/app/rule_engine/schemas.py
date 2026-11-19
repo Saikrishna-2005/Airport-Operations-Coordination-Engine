@@ -136,7 +136,7 @@ class RuleResult(BaseModel):
 
     triggered: bool
 
-    severity: Literal["LOW", "MEDIUM", "HIGH"]
+    severity: Literal["LOW", "MEDIUM", "HIGH", "UNKNOWN"]
 
     message: str
 

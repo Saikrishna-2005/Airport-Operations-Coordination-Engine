@@ -29,6 +29,11 @@ from app.research_agent.tools.flight_tool import (
     get_flights_by_aircraft, get_flights_from_interval, get_track_by_aircraft,
 )
 
+from app.research_agent.config import settings as research_settings
+from app.research_agent.schemas import DataMode
+from app.research_agent.tools.flight_integration import get_integrated_flights
+from app.research_agent.tools.flight_tool import FlightToolOutput
+
 from app.schemas.flight import (
     FlightCreate,
     FlightUpdate,
@@ -148,6 +153,47 @@ def list_flights(
 # GET LIVE AIRCRAFT DETECTED NEAR AN AIRPORT
 # ============================================================
 
+class FlightIntelligenceRequest(BaseModel):
+    airport_code: str = Field(min_length=3, max_length=4, pattern=r"^[A-Za-z]{3,4}$")
+    flight_identifiers: list[str] = Field(min_length=1, max_length=10)
+
+
+class FlightIntelligenceResponse(FlightToolOutput):
+    airport_code: str
+    data_mode: DataMode
+
+
+@router.post("/intelligence", response_model=FlightIntelligenceResponse)
+def flight_intelligence(request: FlightIntelligenceRequest):
+    """Read-only lookup using the server-configured provider mode."""
+    identifiers = list(dict.fromkeys(
+        value.strip().upper() for value in request.flight_identifiers
+    ))
+    if any(not value or len(value) > 16 or not value.isascii()
+           or not value.isalnum() for value in identifiers):
+        raise HTTPException(status_code=422, detail="Invalid flight identifier.")
+    if not research_settings.FLIGHT_INTEGRATION_ENABLED:
+        raise HTTPException(status_code=503, detail="Flight integration is disabled.")
+    mode = DataMode(research_settings.DATA_MODE)
+    airport = request.airport_code.upper()
+    result = get_integrated_flights(
+        airport_code=airport,
+        flight_identifiers=identifiers,
+        research_requirements=[
+            "aircraft tracking", "flight status", "flight delays",
+            "gate assignments", "terminal information", "flight schedules",
+            "estimated times", "actual times",
+        ],
+        mode=mode,
+        timeout_seconds=research_settings.REQUEST_TIMEOUT_SECONDS,
+    )
+    if any(error.code == "AIRPORT_NOT_FOUND" for error in result.errors):
+        raise HTTPException(status_code=404, detail="Airport could not be resolved.")
+    return FlightIntelligenceResponse(
+        airport_code=airport, data_mode=mode, **result.model_dump()
+    )
+
+
 @router.get("/live")
 def list_live_aircraft(
     airport: str = Query(default="DEL", min_length=3, max_length=4),
@@ -161,6 +207,8 @@ def list_live_aircraft(
     """
     from app.research_agent.config import settings as research_settings
 
+    if mode == "live" and research_settings.DATA_MODE != "live":
+        raise HTTPException(status_code=403, detail="Server live mode is disabled.")
     selected_mode = mode or research_settings.DATA_MODE
     result = get_aircraft_in_area(
         airport_code=airport,
@@ -171,7 +219,7 @@ def list_live_aircraft(
     if result.get("status") == "error":
         error = result.get("error") or {}
         code = error.get("code")
-        http_status = 404 if code == "AIRPORT_NOT_FOUND" else 502
+        http_status = 404 if code == "AIRPORT_NOT_FOUND" else 429 if code in {"RATE_LIMITED", "BUDGET_EXHAUSTED"} else 503 if code in {"PENDING_REQUEST", "QUOTA_UNAVAILABLE", "LIVE_DISABLED"} else 502
         raise HTTPException(status_code=http_status, detail=result)
 
     return result
@@ -186,6 +234,8 @@ def _raise_opensky_error(result: dict):
     if result.get("status") == "error":
         error=result.get("error") or {}; code=error.get("code")
         http_status=404 if code in {"AIRPORT_NOT_FOUND","AIRPORT_ICAO_REQUIRED"} else 422 if code and code.startswith("INVALID") else 502
+        if code in {"RATE_LIMITED", "BUDGET_EXHAUSTED"}: http_status=429
+        if code in {"PENDING_REQUEST", "QUOTA_UNAVAILABLE", "LIVE_DISABLED"}: http_status=503
         raise HTTPException(status_code=http_status,detail=result)
     return result
 
@@ -193,29 +243,39 @@ def _raise_opensky_error(result: dict):
 @router.get("/history/arrivals")
 def airport_arrivals(airport: str=Query(...,min_length=3,max_length=4),begin: int=Query(...,gt=0),end: int=Query(...,gt=0)):
     """Historical estimated arrivals. OpenSky records are batch-processed, not real-time."""
+    if research_settings.DATA_MODE != "live":
+        raise HTTPException(status_code=503, detail="Server live mode is disabled; historical fixtures are unavailable.")
     return _raise_opensky_error(get_arrivals_by_airport(airport,begin,end))
 
 
 @router.get("/history/departures")
 def airport_departures(airport: str=Query(...,min_length=3,max_length=4),begin: int=Query(...,gt=0),end: int=Query(...,gt=0)):
     """Historical estimated departures. OpenSky records are batch-processed, not real-time."""
+    if research_settings.DATA_MODE != "live":
+        raise HTTPException(status_code=503, detail="Server live mode is disabled; historical fixtures are unavailable.")
     return _raise_opensky_error(get_departures_by_airport(airport,begin,end))
 
 
 @router.get("/history/aircraft/{icao24}")
 def aircraft_flight_history(icao24: str,begin: int=Query(...,gt=0),end: int=Query(...,gt=0)):
+    if research_settings.DATA_MODE != "live":
+        raise HTTPException(status_code=503, detail="Server live mode is disabled; historical fixtures are unavailable.")
     return _raise_opensky_error(get_flights_by_aircraft(icao24,begin,end))
 
 
 @router.get("/history/interval")
 def flights_in_interval(begin: int=Query(...,gt=0),end: int=Query(...,gt=0)):
     """Historical flights within a maximum two-hour interval."""
+    if research_settings.DATA_MODE != "live":
+        raise HTTPException(status_code=503, detail="Server live mode is disabled; historical fixtures are unavailable.")
     return _raise_opensky_error(get_flights_from_interval(begin,end))
 
 
 @router.get("/tracks/{icao24}")
 def aircraft_track(icao24: str,timestamp: int=Query(default=0,ge=0)):
     """Experimental aircraft trajectory from OpenSky."""
+    if research_settings.DATA_MODE != "live":
+        raise HTTPException(status_code=503, detail="Server live mode is disabled; historical fixtures are unavailable.")
     return _raise_opensky_error(get_track_by_aircraft(icao24,timestamp))
 
 

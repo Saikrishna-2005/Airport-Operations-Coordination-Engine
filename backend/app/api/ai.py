@@ -1,6 +1,7 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from app.core.dependencies import get_current_user
 from pydantic import BaseModel, Field
 
 from app.agents.workflow import build_airport_workflow
@@ -38,7 +39,10 @@ class AIPlanningRequest(BaseModel):
 
 
 @router.post("/planning")
-def generate_ai_plan(request: AIPlanningRequest):
+def generate_ai_plan(
+    request: AIPlanningRequest,
+    current_user: dict = Depends(get_current_user),
+):
 
     try:
 

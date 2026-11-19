@@ -1,28 +1,19 @@
-﻿# Environment variables and secrets
+# Dependencies
+node_modules/
+venv/
+.venv/
+
+# Secrets
 .env
 .env.*
 !.env.example
-**/.env
-**/.env.*
 
-# Python virtual environments
-venv/
-.venv/
-**/venv/
-**/.venv/
-
-# Python cache and testing
+# Python cache
 __pycache__/
-*.py[cod]
 .pytest_cache/
-.coverage
-htmlcov/
+*.pyc
 
-# Frontend dependencies
-node_modules/
-**/node_modules/
-
-# Build files
+# Build output
 dist/
 build/
 
@@ -31,18 +22,27 @@ build/
 *.sqlite
 *.sqlite3
 
-# Logs
+# Large datasets and backups
+aircraftDatabase.csv
+*.zip
+*.ops-backup
+*.ui-backup
 *.log
+node_modules/
+venv/
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+*.log
+aircraftDatabase.csv
+dist/
 
-# IDE files
-.vscode/
-.idea/
 
-# Temporary files
-*.tmp
-*.bak
-tempCodeRunnerFile.py
-
-# OS files
-.DS_Store
-Thumbs.db
+/backend_structure.txt
+/package-lock.json

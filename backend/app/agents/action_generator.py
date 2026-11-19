@@ -7,6 +7,7 @@ from app.agents.action_schemas import ActionProposal
 from app.agents.action_prompts import ACTION_PROPOSAL_PROMPT
 from app.agents.safety_validator import validate_action
 from app.config import settings
+from app.research_agent.config import settings as research_settings
 
 
 class ActionProposalBatch(BaseModel):
@@ -145,6 +146,27 @@ def generate_action_proposals(
     evidence_gaps = collect_evidence_gaps(
         operational_evidence
     )
+
+    # Never send live or unclassified stored evidence to an external LLM.
+    if (research_settings.DATA_MODE != "synthetic"
+            or (research_result or {}).get("data_mode") != "synthetic"):
+        actions = []
+        for row in rule_results or []:
+            flight = row.get("flight_number")
+            if isinstance(flight, str) and 1 <= len(flight) <= 20 and flight.isascii() and flight.isalnum():
+                actions.append(ActionProposal(
+                    action_type="recommend_flight_review",
+                    description="Request human verification of flight evidence and operational constraints.",
+                    target_flight=flight,
+                    payload={"reason": "Verify current evidence before any operational decision.", "risk_level": "medium"},
+                ))
+            if len(actions) >= 20:
+                break
+        if not actions and settings.default_notification_team:
+            actions.append(ActionProposal(action_type="notify_operations_team",
+                description="Request human verification of airport operational evidence.",
+                payload={"team": settings.default_notification_team, "message": "Verify operational evidence before any decision."}))
+        return ActionProposalBatch(actions=actions, validation_results=validate_generated_actions(actions))
 
     # Generate proposals using the LLM.
     llm = get_llm()

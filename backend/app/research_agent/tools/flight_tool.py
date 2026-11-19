@@ -44,6 +44,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 import httpx
+from app.research_agent.tools.opensky_dispatcher import dispatch, DispatchError
 from pydantic import BaseModel, Field
 
 from app.research_agent.schemas import (
@@ -251,9 +252,10 @@ def get_flights(
     if mode_str == "synthetic":
         return _get_synthetic_flights(airport.iata, flight_identifiers, unsupported_fields)
 
+    if mode_str != "live":
+        return FlightToolOutput(errors=[ErrorInfo(tool="flight_tool", code="INVALID_DATA_MODE", message="Invalid data mode.", retryable=False)])
+
     # 4. Live mode with OpenSky Network
-    from app.research_agent.config import settings as app_settings
-    from app.research_agent.tools.opensky_auth import global_auth_manager
 
     # Calculate bounding box coordinates
     lat = airport.latitude
@@ -271,123 +273,10 @@ def get_flights(
         managed_client = True
 
     try:
-        # Check OAuth2 credentials
-        cid = (app_settings.FLIGHT_CLIENT_ID or "").strip()
-        csec = (app_settings.FLIGHT_CLIENT_SECRET or "").strip()
-        use_auth = bool(cid and csec)
-
-        headers: dict[str, str] = {}
-        token: str | None = None
-
-        if use_auth:
-            token, auth_err = global_auth_manager.get_token(cid, csec, client)
-            if auth_err:
-                # Token failure must produce error FlightResults for all identifiers and never silently fall back
-                flight_results = [
-                    FlightResult(
-                        requested_identifier=ident,
-                        status=FlightLookupStatus.error,
-                        provider="opensky",
-                        data={"error": auth_err.message, "code": auth_err.code},
-                        data_timestamp=None,
-                        source_id=None,
-                    )
-                    for ident in flight_identifiers
-                ]
-                return FlightToolOutput(flights=flight_results, sources=[], errors=[auth_err])
-            headers["Authorization"] = f"Bearer {token}"
-
-        response: httpx.Response | None = None
-        last_error_code = ""
-        last_error_message = ""
-        retryable_error = False
-
-        for attempt in range(2):
-            try:
-                response = client.get(OPENSKY_STATES_URL, params=params, headers=headers)
-                if response.status_code == 200:
-                    break
-                elif response.status_code == 401 and use_auth:
-                    # Token might have expired: invalidate cache and retry once with fresh token
-                    global_auth_manager.clear()
-                    token, auth_err = global_auth_manager.get_token(cid, csec, client, force_refresh=True)
-                    if auth_err:
-                        last_error_code = auth_err.code
-                        last_error_message = auth_err.message
-                        retryable_error = auth_err.retryable
-                        break
-                    headers["Authorization"] = f"Bearer {token}"
-                    # Try states request once more
-                    response = client.get(OPENSKY_STATES_URL, params=params, headers=headers)
-                    if response.status_code == 200:
-                        break
-                    elif response.status_code in (401, 403):
-                        last_error_code = "AUTH_FAILED"
-                        last_error_message = f"OpenSky authentication failed (HTTP {response.status_code})."
-                        retryable_error = False
-                        break
-                elif response.status_code == 429:
-                    last_error_code = "RATE_LIMITED"
-                    last_error_message = "OpenSky rate limit exceeded (HTTP 429)."
-                    retryable_error = True
-                    break  # no retry on 429
-                elif response.status_code in (401, 403):
-                    last_error_code = "AUTH_FAILED"
-                    last_error_message = f"OpenSky authentication failed (HTTP {response.status_code})."
-                    retryable_error = False
-                    break  # no retry on auth failure
-                elif 500 <= response.status_code < 600:
-                    last_error_code = "PROVIDER_ERROR"
-                    last_error_message = f"OpenSky upstream server error (HTTP {response.status_code})."
-                    retryable_error = True
-                    if attempt == 0:
-                        continue  # retry once
-                    break
-                elif 400 <= response.status_code < 500:
-                    last_error_code = "PROVIDER_REJECTED"
-                    last_error_message = f"OpenSky rejected request (HTTP {response.status_code})."
-                    retryable_error = False
-                    break
-                else:
-                    last_error_code = "PROVIDER_ERROR"
-                    last_error_message = f"Unexpected HTTP status {response.status_code}."
-                    retryable_error = False
-                    break
-            except httpx.TimeoutException:
-                last_error_code = "TIMEOUT"
-                last_error_message = "OpenSky request timed out."
-                retryable_error = True
-                if attempt == 0:
-                    continue  # retry once
-                break
-            except httpx.RequestError:
-                last_error_code = "PROVIDER_ERROR"
-                last_error_message = "Network error connecting to OpenSky."
-                retryable_error = True
-                if attempt == 0:
-                    continue
-                break
-
-        # Handle non-200 outcome
-        if response is None or response.status_code != 200:
-            err = ErrorInfo(
-                tool="flight_tool",
-                code=last_error_code,
-                message=last_error_message,
-                retryable=retryable_error,
-            )
-            flight_results = [
-                FlightResult(
-                    requested_identifier=ident,
-                    status=FlightLookupStatus.error,
-                    provider="opensky",
-                    data={"error": last_error_message, "code": last_error_code},
-                    data_timestamp=None,
-                    source_id=None,
-                )
-                for ident in flight_identifiers
-            ]
-            return FlightToolOutput(flights=flight_results, sources=[], errors=[err])
+        try:
+            response = dispatch(client, OPENSKY_STATES_URL, params)
+        except DispatchError as exc:
+            return FlightToolOutput(flights=[FlightResult(requested_identifier=i, status=FlightLookupStatus.error, provider="opensky", data={"error":exc.message,"code":exc.code}) for i in flight_identifiers], errors=[ErrorInfo(tool="flight_tool",code=exc.code,message=exc.message,retryable=exc.retryable)])
 
         # Parse JSON
         try:
@@ -582,8 +471,8 @@ def get_aircraft_in_area(
             {
                 "icao24": "8005b1", "callsign": "AIC101",
                 "origin_country": "India", "time_position": ts - 20,
-                "last_contact": ts - 10, "longitude": 28.6139,
-                "latitude": 77.2090, "baro_altitude": 3200.0,
+                "last_contact": ts - 10, "longitude": 77.2090,
+                "latitude": 28.6139, "baro_altitude": 3200.0,
                 "on_ground": False, "velocity": 140.0,
                 "true_track": 110.0, "vertical_rate": 0.0,
                 "geo_altitude": 3300.0, "squawk": "1234",
@@ -591,8 +480,8 @@ def get_aircraft_in_area(
             {
                 "icao24": "800a42", "callsign": "6E204",
                 "origin_country": "India", "time_position": ts - 45,
-                "last_contact": ts - 20, "longitude": 28.5562,
-                "latitude": 77.1000, "baro_altitude": 220.0,
+                "last_contact": ts - 20, "longitude": 77.1000,
+                "latitude": 28.5562, "baro_altitude": 220.0,
                 "on_ground": True, "velocity": 0.0,
                 "true_track": 280.0, "vertical_rate": 0.0,
                 "geo_altitude": 220.0, "squawk": "2345",
@@ -625,8 +514,6 @@ def get_aircraft_in_area(
             "error": {"code": "INVALID_DATA_MODE", "message": "Mode must be 'live' or 'synthetic'."},
         }
 
-    from app.research_agent.config import settings as app_settings
-    from app.research_agent.tools.opensky_auth import global_auth_manager
 
     lat, lon = airport.latitude, airport.longitude
     params = {
@@ -641,72 +528,10 @@ def get_aircraft_in_area(
         client = httpx.Client(timeout=timeout_seconds)
 
     try:
-        cid = (app_settings.FLIGHT_CLIENT_ID or "").strip()
-        csec = (app_settings.FLIGHT_CLIENT_SECRET or "").strip()
-        headers: dict[str, str] = {}
-
-        if cid and csec:
-            token, auth_err = global_auth_manager.get_token(cid, csec, client)
-            if auth_err:
-                return {
-                    "status": "error", "airport_code": airport.iata,
-                    "provider": "opensky", "retrieved_at": now_utc.isoformat(),
-                    "aircraft_count": 0, "aircraft": [],
-                    "error": {"code": auth_err.code, "message": auth_err.message},
-                }
-            headers["Authorization"] = f"Bearer {token}"
-
-        response = None
-        last_error = None
-
-        for attempt in range(2):
-            try:
-                response = client.get(OPENSKY_STATES_URL, params=params, headers=headers)
-                if response.status_code == 200:
-                    break
-                if response.status_code == 401 and cid and csec:
-                    global_auth_manager.clear()
-                    token, auth_err = global_auth_manager.get_token(
-                        cid, csec, client, force_refresh=True
-                    )
-                    if auth_err:
-                        last_error = {"code": auth_err.code, "message": auth_err.message}
-                        break
-                    headers["Authorization"] = f"Bearer {token}"
-                    response = client.get(OPENSKY_STATES_URL, params=params, headers=headers)
-                    if response.status_code == 200:
-                        break
-                if response.status_code == 429:
-                    last_error = {"code": "RATE_LIMITED", "message": "OpenSky rate limit exceeded."}
-                    break
-                if response.status_code in (401, 403):
-                    last_error = {"code": "AUTH_FAILED", "message": f"OpenSky authentication failed (HTTP {response.status_code})."}
-                    break
-                if response.status_code >= 500 and attempt == 0:
-                    continue
-                last_error = {
-                    "code": "PROVIDER_ERROR",
-                    "message": f"OpenSky returned HTTP {response.status_code}.",
-                }
-                break
-            except httpx.TimeoutException:
-                last_error = {"code": "TIMEOUT", "message": "OpenSky request timed out."}
-                if attempt == 0:
-                    continue
-                break
-            except httpx.RequestError:
-                last_error = {"code": "NETWORK_ERROR", "message": "Could not connect to OpenSky."}
-                if attempt == 0:
-                    continue
-                break
-
-        if response is None or response.status_code != 200:
-            return {
-                "status": "error", "airport_code": airport.iata,
-                "provider": "opensky", "retrieved_at": now_utc.isoformat(),
-                "aircraft_count": 0, "aircraft": [],
-                "error": last_error or {"code": "PROVIDER_ERROR", "message": "OpenSky request failed."},
-            }
+        try:
+            response = dispatch(client, OPENSKY_STATES_URL, params)
+        except DispatchError as exc:
+            return {"status":"error","airport_code":airport.iata,"provider":"opensky","retrieved_at":now_utc.isoformat(),"aircraft_count":0,"aircraft":[],"error":{"code":exc.code,"message":exc.message}}
 
         try:
             payload = response.json()
@@ -774,55 +599,18 @@ OPENSKY_TRACKS_URL = "https://opensky-network.org/api/tracks/all"
 
 def _opensky_history_request(url: str, params: dict[str, Any], *, timeout_seconds: float = 30.0, client: httpx.Client | None = None) -> tuple[Any | None, dict[str, Any] | None]:
     """Authenticated OpenSky history request. Returns decoded JSON or a safe error."""
-    from app.research_agent.config import settings as app_settings
-    from app.research_agent.tools.opensky_auth import global_auth_manager
     managed_client = client is None
     if client is None:
         client = httpx.Client(timeout=timeout_seconds)
     try:
-        cid = (app_settings.FLIGHT_CLIENT_ID or "").strip()
-        csec = (app_settings.FLIGHT_CLIENT_SECRET or "").strip()
-        headers: dict[str, str] = {}
-        if cid and csec:
-            token, auth_err = global_auth_manager.get_token(cid, csec, client)
-            if auth_err:
-                return None, {"code": auth_err.code, "message": auth_err.message}
-            headers["Authorization"] = f"Bearer {token}"
-        response = None
-        for attempt in range(2):
-            try:
-                response = client.get(url, params=params, headers=headers)
-                if response.status_code == 401 and cid and csec and attempt == 0:
-                    global_auth_manager.clear()
-                    token, auth_err = global_auth_manager.get_token(cid, csec, client, force_refresh=True)
-                    if auth_err:
-                        return None, {"code": auth_err.code, "message": auth_err.message}
-                    headers["Authorization"] = f"Bearer {token}"
-                    continue
-                if response.status_code == 404:
-                    return [], None
-                if response.status_code == 429:
-                    return None, {"code": "RATE_LIMITED", "message": "OpenSky rate limit exceeded; retry later."}
-                if response.status_code in (401, 403):
-                    return None, {"code": "AUTH_FAILED", "message": f"OpenSky authorization failed (HTTP {response.status_code})."}
-                if response.status_code >= 500 and attempt == 0:
-                    continue
-                if response.status_code != 200:
-                    return None, {"code": "PROVIDER_REJECTED", "message": f"OpenSky rejected the request (HTTP {response.status_code})."}
-                try:
-                    return response.json(), None
-                except ValueError:
-                    return None, {"code": "INVALID_PAYLOAD", "message": "OpenSky returned malformed JSON."}
-            except httpx.TimeoutException:
-                if attempt == 0: continue
-                return None, {"code": "TIMEOUT", "message": "OpenSky request timed out."}
-            except httpx.RequestError:
-                if attempt == 0: continue
-                return None, {"code": "NETWORK_ERROR", "message": "Could not connect to OpenSky."}
-        return None, {"code": "PROVIDER_ERROR", "message": f"OpenSky request failed (HTTP {response.status_code})." if response is not None else "OpenSky request failed."}
+        response = dispatch(client,url,params)
+        if response.status_code == 404: return [], None
+        try: return response.json(), None
+        except ValueError: return None, {"code":"INVALID_PAYLOAD","message":"Malformed OpenSky JSON."}
+    except DispatchError as exc:
+        return None, {"code":exc.code,"message":exc.message}
     finally:
-        if managed_client:
-            client.close()
+        if managed_client: client.close()
 
 
 def _validate_opensky_interval(begin: int, end: int, *, max_seconds: int = 172800) -> None:

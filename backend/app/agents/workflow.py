@@ -5,7 +5,7 @@ from typing import TypedDict, NotRequired
 
 from langgraph.graph import StateGraph, START, END
 
-from app.agents.planning_agent import run_planning_agent
+from app.agents.planning_agent import run_planning_agent, generate_fallback_plan
 
 from app.rule_engine.engine import evaluate_operational_rules
 from app.rule_engine.schemas import (
@@ -71,19 +71,27 @@ def planning_node(state: AirportWorkflowState) -> dict:
         "advisory_only": True,
     }
 
-    result = run_planning_agent(
+    research_status = (state.get("research_result") or {}).get("status")
+    degraded = research_status != "success"
+    mode = DataMode(research_settings.DATA_MODE)
+    # Use a deterministic investigation-only plan when evidence is incomplete
+    # or when live provider data must not be forwarded to an external LLM.
+    planner = generate_fallback_plan if degraded or mode == DataMode.live else run_planning_agent
+    result = planner(
         workflow_id=state["workflow_id"],
         airport=state["airport"],
         disruption=state["disruption"],
         affected_flights=state["affected_flights"],
-        gate_information=state.get("gate_result"),
+        gate_information=state.get("gate_result") or {},
         operational_information=operational_information,
     )
-
-    return {
-        "planning_result": result.model_dump(),
-        "status": "planning_gates_and_rules_completed_pending_review",
-    }
+    if degraded:
+        status = "planning_degraded_research_pending_review"
+    elif planner is generate_fallback_plan or result.status == "fallback_planning_used_pending_review":
+        status = "fallback_planning_used_pending_review"
+    else:
+        status = "planning_gates_and_rules_completed_pending_review"
+    return {"planning_result": result.model_dump(), "status": status}
 
 
 # =========================================================
@@ -297,6 +305,90 @@ def get_overlapping_gate_assignments(
 # RULE ENGINE
 # =========================================================
 
+def synthetic_delay_evidence(state, flight_number):
+    """Use only structured, attributed synthetic evidence for this workflow."""
+    result = state.get("research_result") or {}
+    if (result.get("data_mode") != "synthetic"
+        or result.get("workflow_id") != state["workflow_id"]
+        or result.get("airport_code") != state["airport"].strip().upper()
+        or result.get("status") not in ("success", "partial_success")):
+        return None, "UNAVAILABLE_SYNTHETIC_EVIDENCE"
+    matches = [f for f in result.get("flights", [])
+               if f.get("requested_identifier", "").strip().upper() == flight_number]
+    if len(matches) != 1 or matches[0].get("status") != "found":
+        return None, "UNAVAILABLE_SYNTHETIC_EVIDENCE"
+    f = matches[0]
+    op = f.get("operational_data") or {}
+    if op.get("flight_number") != flight_number:
+        return None, "UNAVAILABLE_SYNTHETIC_EVIDENCE"
+    airport = state["airport"].strip().upper()
+    sources = {v.get("source_id"): v for v in result.get("sources", [])}
+    values = []
+    for endpoint, field in (("destination_airport", "arrival_delay_minutes"),
+                            ("origin_airport", "departure_delay_minutes")):
+        if op.get(endpoint) != airport:
+            continue
+        value = op.get(field)
+        if type(value) is not int or value < 0:
+            continue
+        if any(c.get("field_name") in (field, "operational_data." + field) and not c.get("resolved")
+               for c in f.get("conflicts", [])):
+            continue
+        provenance = (f.get("field_sources") or {}).get("operational_data." + field) or {}
+        source = sources.get(provenance.get("source_id")) or {}
+        if (provenance.get("provider", "").lower() == "cirium-synthetic"
+            and source.get("provider", "").lower() == "cirium-synthetic"
+            and source.get("data_type", "").lower() == "synthetic"):
+            values.append((value, "SYNTHETIC_CIRIUM:" + field + ":" + source["source_id"]))
+    return max(values, key=lambda pair: pair[0]) if values else (None, "UNAVAILABLE_SYNTHETIC_EVIDENCE")
+
+
+def live_delay_evidence(state, flight_number):
+    """Use only structured, attributed live evidence for this workflow."""
+    result = state.get("research_result") or {}
+    if (result.get("data_mode") != "live"
+        or result.get("workflow_id") != state["workflow_id"]
+        or result.get("airport_code") != state["airport"].strip().upper()
+        or result.get("status") not in ("success", "partial_success")):
+        return None, "UNAVAILABLE_LIVE_EVIDENCE"
+    matches = [f for f in result.get("flights", [])
+               if f.get("requested_identifier", "").strip().upper() == flight_number]
+    if len(matches) != 1 or matches[0].get("status") != "found":
+        return None, "UNAVAILABLE_LIVE_EVIDENCE"
+    f = matches[0]
+    if f.get("conflicts") or result.get("errors") or f.get("provider") != "cirium":
+        return None, "UNAVAILABLE_LIVE_EVIDENCE"
+    op = f.get("operational_data") or {}
+    if op.get("flight_number") != flight_number:
+        return None, "UNAVAILABLE_LIVE_EVIDENCE"
+    airport = state["airport"].strip().upper()
+    sources = {v.get("source_id"): v for v in result.get("sources", [])}
+    values = []
+    for endpoint, field in (("destination_airport", "arrival_delay_minutes"),
+                            ("origin_airport", "departure_delay_minutes")):
+        if op.get(endpoint) != airport:
+            continue
+        value = op.get(field)
+        if type(value) is not int or value < 0:
+            continue
+        if any(c.get("field_name") in (field, "operational_data." + field) and not c.get("resolved")
+               for c in f.get("conflicts", [])):
+            continue
+        provenance = (f.get("field_sources") or {}).get("operational_data." + field) or {}
+        source = sources.get(provenance.get("source_id")) or {}
+        if (provenance.get("provider", "").lower() == "cirium"
+            and source.get("provider", "").lower() == "cirium"
+            and source.get("data_type", "").lower() == "live"):
+            try:
+                retrieved = datetime.fromisoformat(source["retrieved_at"].replace("Z", "+00:00"))
+                if not 0 <= (datetime.now(timezone.utc) - retrieved).total_seconds() <= 300:
+                    continue
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue
+            values.append((value, "LIVE_CIRIUM:" + field + ":" + source["source_id"]))
+    return max(values, key=lambda pair: pair[0]) if values else (None, "UNAVAILABLE_LIVE_EVIDENCE")
+
+
 def rule_engine_node(
     state: AirportWorkflowState,
 ) -> dict:
@@ -332,86 +424,94 @@ def rule_engine_node(
     # 2. RETRIEVE WEATHER DATA
     # -----------------------------------------------------
 
-    weather = get_weather_data(airport)
+    # Do not call the live weather tool during synthetic execution.
+    mode = DataMode(research_settings.DATA_MODE)
+    if mode == DataMode.synthetic:
+        weather = {"source": "SYNTHETIC_MODE_NO_RAINFALL_MEASUREMENT"}
+        rainfall_mm = None
+        observation_time = None
+        observation_age_minutes = None
+    else:
+        weather = get_weather_data(airport)
 
-    if not weather.get("success"):
-        raise ValueError(
-            "Weather data unavailable: "
-            + str(
-                weather.get(
-                    "reason",
-                    "Unknown weather provider error",
+        if not weather.get("success"):
+            raise ValueError(
+                "Weather data unavailable: "
+                + str(
+                    weather.get(
+                        "reason",
+                        "Unknown weather provider error",
+                    )
                 )
             )
-        )
 
-    rainfall_value = weather.get("rain_mm")
+        rainfall_value = weather.get("rain_mm")
 
-    if rainfall_value is None:
-        raise ValueError(
-            "Weather data unavailable: "
-            "rain_mm measurement is missing."
-        )
-
-    try:
-        rainfall_mm = float(rainfall_value)
-
-    except (TypeError, ValueError):
-        raise ValueError(
-            "Weather data unavailable: "
-            "rain_mm is not a valid numeric measurement."
-        )
-
-    if not math.isfinite(rainfall_mm) or rainfall_mm < 0:
-        raise ValueError(
-            "Weather data unavailable: "
-            "rain_mm must be finite and non-negative."
-        )
-
-    # -----------------------------------------------------
-    # 3. VALIDATE WEATHER OBSERVATION TIME
-    # -----------------------------------------------------
-
-    observation_time = weather.get("observation_time")
-
-    if not observation_time:
-        raise ValueError(
-            "Weather observation time is missing."
-        )
-
-    try:
-        observed_at = datetime.fromisoformat(
-            observation_time.replace("Z", "+00:00")
-        )
-
-        # Open-Meteo is requested with timezone="UTC".
-        # Its timestamps may omit an explicit UTC offset.
-
-        if observed_at.tzinfo is None:
-            observed_at = observed_at.replace(
-                tzinfo=timezone.utc
-            )
-        else:
-            observed_at = observed_at.astimezone(
-                timezone.utc
+        if rainfall_value is None:
+            raise ValueError(
+                "Weather data unavailable: "
+                "rain_mm measurement is missing."
             )
 
-    except (TypeError, AttributeError, ValueError) as exc:
-        raise ValueError(
-            f"Invalid weather observation time: {exc}"
-        )
+        try:
+            rainfall_mm = float(rainfall_value)
 
-    observation_age_minutes = (
-        datetime.now(timezone.utc) - observed_at
-    ).total_seconds() / 60
+        except (TypeError, ValueError):
+            raise ValueError(
+                "Weather data unavailable: "
+                "rain_mm is not a valid numeric measurement."
+            )
 
-    # Configurable development freshness threshold.
+        if not math.isfinite(rainfall_mm) or rainfall_mm < 0:
+            raise ValueError(
+                "Weather data unavailable: "
+                "rain_mm must be finite and non-negative."
+            )
 
-    if not -5 <= observation_age_minutes <= 60:
-        raise ValueError(
-            "Weather observation is outside the "
-            "configured 60-minute freshness window."
-        )
+        # -----------------------------------------------------
+        # 3. VALIDATE WEATHER OBSERVATION TIME
+        # -----------------------------------------------------
+
+        observation_time = weather.get("observation_time")
+
+        if not observation_time:
+            raise ValueError(
+                "Weather observation time is missing."
+            )
+
+        try:
+            observed_at = datetime.fromisoformat(
+                observation_time.replace("Z", "+00:00")
+            )
+
+            # Open-Meteo is requested with timezone="UTC".
+            # Its timestamps may omit an explicit UTC offset.
+
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.replace(
+                    tzinfo=timezone.utc
+                )
+            else:
+                observed_at = observed_at.astimezone(
+                    timezone.utc
+                )
+
+        except (TypeError, AttributeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid weather observation time: {exc}"
+            )
+
+        observation_age_minutes = (
+            datetime.now(timezone.utc) - observed_at
+        ).total_seconds() / 60
+
+        # Configurable development freshness threshold.
+
+        if not -5 <= observation_age_minutes <= 60:
+            raise ValueError(
+                "Weather observation is outside the "
+                "configured 60-minute freshness window."
+            )
 
     # -----------------------------------------------------
     # 4. RETRIEVE RUNWAY STATUS
@@ -423,6 +523,8 @@ def rule_engine_node(
     )
 
     runway_available = runway_info["available"]
+    if runway_available is True and not runway_info.get("verified"):
+        runway_available = None
 
     # -----------------------------------------------------
     # 5. EVALUATE RULES FOR EACH FLIGHT
@@ -434,27 +536,16 @@ def rule_engine_node(
         normalized_number = flight_number.strip().upper()
         matches = flight_lookup.get(normalized_number, [])
 
-        if len(matches) > 1:
+        if mode == DataMode.live and len(matches) > 1:
             raise ValueError(
                 f"Multiple database records found for flight {flight_number}."
             )
 
         # Determine delay information from SQLite when available.
-        if matches:
-            flight_record = matches[0]
-            raw_delay = flight_record.get("delay_minutes")
-
-            delay_minutes = (
-                int(raw_delay) if raw_delay is not None else None
-            )
-
-            delay_source = "SQLITE_FLIGHT_DATABASE"
-
+        if mode == DataMode.synthetic:
+            delay_minutes, delay_source = synthetic_delay_evidence(state, normalized_number)
         else:
-            # Aircraft may exist in live OpenSky data without a SQLite record.
-            flight_record = None
-            delay_minutes = None
-            delay_source = "UNAVAILABLE_NOT_IN_SQLITE"
+            delay_minutes, delay_source = live_delay_evidence(state, normalized_number)
 
         # -------------------------------------------------
         # 5A. RETRIEVE GATE ASSIGNMENT EVIDENCE
@@ -528,7 +619,7 @@ def rule_engine_node(
             },
             "input_sources": {
                 "delay_minutes": delay_source,
-                "rainfall_mm": "OPEN_METEO",
+                "rainfall_mm": ("OPEN_METEO" if mode == DataMode.live else "UNAVAILABLE_SYNTHETIC_MODE"),
                 "runway_available": runway_info["source"],
             },
             "weather_metadata": {
@@ -536,9 +627,7 @@ def rule_engine_node(
                 "observation_time": observation_time,
                 "retrieved_at": weather.get("retrieved_at"),
                 "cached": weather.get("cached", False),
-                "observation_age_minutes": round(
-                    observation_age_minutes, 2
-                ),
+                "observation_age_minutes": (round(observation_age_minutes, 2) if observation_age_minutes is not None else None),
             },
             "runway_metadata": runway_info,
             "advisory_only": True,
@@ -629,16 +718,16 @@ def build_airport_workflow():
 
     graph.add_edge(
         "gate_availability",
-        "rule_engine",
-    )
-
-    graph.add_edge(
-        "rule_engine",
         "research_agent",
     )
 
     graph.add_edge(
         "research_agent",
+        "rule_engine",
+    )
+
+    graph.add_edge(
+        "rule_engine",
         "planning_agent",
     )
 

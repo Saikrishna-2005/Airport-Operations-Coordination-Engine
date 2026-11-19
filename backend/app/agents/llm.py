@@ -9,8 +9,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 ENV_FILE = BACKEND_DIR / ".env"
 
-# Ensure .env values override previously loaded environment values
-load_dotenv(dotenv_path=ENV_FILE, override=True)
+# Preserve explicitly configured process environment values
+load_dotenv(dotenv_path=ENV_FILE, override=False)
 
 
 def get_llm():

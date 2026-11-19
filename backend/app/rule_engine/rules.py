@@ -10,7 +10,7 @@ def evaluate_delay_rule(data: OperationalInput) -> RuleResult:
             rule_id="RULE-001",
             rule_name="Flight Delay Risk",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 f"Delay information for flight {data.flight_number} "
@@ -42,7 +42,7 @@ def evaluate_rainfall_rule(data: OperationalInput) -> RuleResult:
             rule_id="RULE-002",
             rule_name="Heavy Rainfall Risk",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 "A separate rainfall measurement is unavailable. "
@@ -74,7 +74,7 @@ def evaluate_runway_rule(data: OperationalInput) -> RuleResult:
             rule_id="RULE-003",
             rule_name="Runway Availability Risk",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 "Runway availability is unknown. "
@@ -126,7 +126,7 @@ def evaluate_gate_conflict_rule(data: OperationalInput) -> RuleResult:
             rule_id="RULE-004",
             rule_name="Gate Double-Booking Detection",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 f"Gate assignment information for flight "
@@ -144,7 +144,7 @@ def evaluate_gate_conflict_rule(data: OperationalInput) -> RuleResult:
             rule_id="RULE-004",
             rule_name="Gate Double-Booking Detection",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 "The requested gate assignment does not match "
@@ -227,7 +227,7 @@ def evaluate_staff_availability_rule(
             rule_id="RULE-007",
             rule_name="Crew/Staff Availability Validation",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 f"Staff availability information for flight "
@@ -255,7 +255,7 @@ def evaluate_staff_availability_rule(
                 rule_id="RULE-007",
                 rule_name="Crew/Staff Availability Validation",
                 triggered=False,
-                severity="LOW",
+                severity="UNKNOWN",
                 evaluation_status="NOT_EVALUATED",
                 message=(
                     "Staff availability could not be evaluated "
@@ -324,7 +324,7 @@ def evaluate_permission_validation_rule(
             rule_id="RULE-008",
             rule_name="Operational Permission Validation",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 "Permission request information is unavailable. "
@@ -362,7 +362,7 @@ def evaluate_permission_validation_rule(
             rule_id="RULE-008",
             rule_name="Operational Permission Validation",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 "Permission request could not be found or verified."
@@ -375,7 +375,7 @@ def evaluate_permission_validation_rule(
             rule_id="RULE-008",
             rule_name="Operational Permission Validation",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 "Permission request ownership does not match "
@@ -392,7 +392,7 @@ def evaluate_permission_validation_rule(
             rule_id="RULE-008",
             rule_name="Operational Permission Validation",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message=(
                 "Permission request flight does not match "
@@ -405,7 +405,7 @@ def evaluate_permission_validation_rule(
             rule_id="RULE-008",
             rule_name="Operational Permission Validation",
             triggered=False,
-            severity="LOW",
+            severity="UNKNOWN",
             evaluation_status="NOT_EVALUATED",
             message="Permission request has no valid requested action.",
         )
@@ -433,7 +433,7 @@ def evaluate_permission_validation_rule(
                 rule_id="RULE-008",
                 rule_name="Operational Permission Validation",
                 triggered=False,
-                severity="LOW",
+                severity="UNKNOWN",
                 evaluation_status="NOT_EVALUATED",
                 message="Rejected request has no recorded reviewer.",
             )
@@ -457,7 +457,7 @@ def evaluate_permission_validation_rule(
                 rule_id="RULE-008",
                 rule_name="Operational Permission Validation",
                 triggered=False,
-                severity="LOW",
+                severity="UNKNOWN",
                 evaluation_status="NOT_EVALUATED",
                 message="Approved request has no recorded reviewer.",
             )
@@ -480,7 +480,7 @@ def evaluate_permission_validation_rule(
         rule_id="RULE-008",
         rule_name="Operational Permission Validation",
         triggered=False,
-        severity="LOW",
+        severity="UNKNOWN",
         evaluation_status="NOT_EVALUATED",
         message="Permission request has an unrecognized status.",
     )

@@ -12,7 +12,7 @@ const agents = [
   {
     name: "Research Agent",
     description: "Collects flight and weather information.",
-    status: "Integration Pending",
+    status: "Implemented",
     icon: Search,
   },
   {
@@ -72,7 +72,7 @@ export default function AgentMonitoring() {
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
           <BrainCircuit className="mb-3 text-green-400" size={24} />
           <p className="text-sm text-slate-400">Implemented Agents</p>
-          <h2 className="mt-2 text-3xl font-bold">1</h2>
+          <h2 className="mt-2 text-3xl font-bold">2</h2>
           <p className="mt-1 text-xs text-slate-500">
             Gemini Planning Agent
           </p>
@@ -80,7 +80,7 @@ export default function AgentMonitoring() {
 
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
           <Plane className="mb-3 text-amber-400" size={24} />
-          <p className="text-sm text-slate-400">Gate Availability</p>
+          <p className="text-sm text-slate-400">Flight and Staff Availability</p>
           <h2 className="mt-2 text-xl font-bold">Integrated</h2>
           <p className="mt-1 text-xs text-slate-500">
             Shared backend tool
@@ -145,9 +145,9 @@ export default function AgentMonitoring() {
         </h2>
 
         <p className="mt-2 text-sm text-slate-400">
-          The Planning Agent and Gate Availability Tool are implemented.
+          The Planning Agent,Research Agent and Gate Availability Tool are implemented.
           Flight Research, live agent activity, and Decision Support
-          API integration will be added in the next steps.
+          API integration added and Resource Agent will be integrated in the next steps.
         </p>
       </div>
     </div>
